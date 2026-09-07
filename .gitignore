@@ -1,0 +1,20 @@
+node_modules/
+dist/
+.next/
+coverage/
+*.log
+
+.env
+.env.local
+.env.*.local
+
+# Agent anahtarlari ve hesaplari — ASLA commit edilmez
+agents/accounts.json
+agents/*.key
+agents/*.pem
+
+# Deploy ciktilari (adresler paylasilir, anahtarlar paylasilmaz)
+deployments/*.local.json
+
+.DS_Store
+Thumbs.db

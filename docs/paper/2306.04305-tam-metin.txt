@@ -1,0 +1,1563 @@
+
+
+[2306.04305] Self-Resolving Prediction Markets for Unverifiable Outcomes
+
+- 
+
+- 
+- 
+- 
+
+# Self-Resolving Prediction Markets for 
+Unverifiable Outcomes
+
+Siddarth Srinivasan
+
+Affiliation: Harvard University
+
+Affiliation: Cambridge, MA, USA
+
+Email: ssrinivasan@seas.harvard.edu
+
+Ezra Karger
+
+Affiliation: Federal Reserve Bank of Chicago
+
+Affiliation: Chicago, IL, USA
+
+Email: ezra.karger@chi.frb.org
+
+Yiling Chen
+
+Affiliation: Harvard University
+
+Affiliation: Cambridge, MA, USA
+
+Email: yiling@seas.harvard.edu
+
+###### Abstract
+
+Prediction markets elicit and aggregate beliefs by paying agents based on how close their predictions are to a verifiable future outcome. However, outcomes of many important questions are difficult to verify or unverifiable, in that the ground truth may be hard or impossible to access. We present a novel incentive-compatible prediction market mechanism to elicit and efficiently aggregate information from a pool of agents without observing the outcome, by paying agents the negative cross-entropy between their prediction and that of a carefully chosen reference agent. Our key insight is that a reference agent with access to more information can serve as a reasonable proxy for the ground truth. We use this insight to propose self-resolving prediction markets that terminate with some probability after every report and pay all but a few agents based on the final prediction. The final agent is chosen as the reference agent since they observe the full history of market forecasts, and thus have more information by design. We show that it is a perfect Bayesian equilibrium (PBE) for all agents to report truthfully in our mechanism and to believe that all other agents report truthfully. Although primarily of interest for unverifiable outcomes, this design is also applicable for verifiable outcomes.
+
+## 1 Introduction
+
+Decision-makers often tackle complex problems based on beliefs that are difficult to validate because the ground truth is inaccessible or prohibitively expensive to access.
+For example, the causal effects of policy interventions can be hard to verify, yet policy-makers propose and implement policies with complicated societal outcomes; economic and political outcomes in the distant future can be hard to predict, yet people must make plans about where to live, where to work, and how to allocate resources today; and determining that a piece of content is misinformation or a violation of terms of service is challenging, yet social media platforms make content moderation decisions to improve user experiences.
+What these examples all have in common is that in the face of unverifiable questions, decision-makers gather information from varied sources to arrive at a ‘best guess.’
+
+The general problem of eliciting and aggregating disparate beliefs and data into a single ‘best guess’ in the absence of ground truth verification is technically challenging. How do agents reason about revealing their own information, and how can we incentivize them to reveal this privately held information? In this paper, we make progress on this problem by proposing the first incentive-compatible self-resolving prediction market (or equivalently, sequential peer prediction mechanism) that simultaneously elicits and aggregates beliefs in the absence of ground truth, under nearly the same assumptions as standard prediction markets. Our proposed design sequentially elicits and aggregates probabilistic predictions, randomly terminates with some probability $\alpha$ after each prediction, and pays all but the last few agents based on the prediction of the final agent.
+
+ $0$ $1$ $2$ $3$ $T-k$ $T-k+1$ $T$ end $1-\alpha$ $1-\alpha$ $...$ $1-\alpha$ $...$ $\alpha$ $R$ $R$ 
+
+ $S_{CEM}(q^{(T)},q^{(1)})$ 
+
+ $S_{CEM}(q^{(T)},q^{(2)})$ 
+
+ $S_{CEM}(q^{(T)},q^{(3)})$ 
+
+ $S_{CEM}(q^{(T)},q^{(T-k)})$ 
+
+Figure 1: Illustration of a self-resolving prediction market. Each node represents an agent reporting a prediction to the mechanism, and the mechanism terminates with probability $\alpha$ after each report. Payouts for the first $T-k$ agents are determined using a negative cross-entropy market scoring rule with respect to the terminal agent $T$ , while the last $k$ agents receive a flat payout $R$ . $k$ can be chosen to be large enough so the mechanism is strictly truthful.
+
+#### Contributions
+
+Our primary contribution is a novel incentive-compatible mechanism that can elicit and aggregate truthful reports even in the absence of ground truth, under very similar assumptions as are applicable to standard prediction markets. Our work builds on three connected literatures: Aumann’s agreement theorem, prediction markets, and peer prediction. Specifically: (1) unlike the standard framework of Aumann’s agreement theorem, our mechanism provides incentives for truthful information revelation and aggregation under the standard Aumannian protocol with many agents when agents’ signals are conditionally independent given the ground truth (a kind of ‘informational substitutes’ condition); (2) unlike prediction markets, our mechanism works even without access to the ground truth; and (3) unlike peer prediction mechanisms, our mechanism also efficiently aggregates information into a consensus prediction in the single-task setting while ensuring that it elicits minimal information, accommodates heterogeneous agents with non-binary signals, and pays zero in uninformative equilibria, as long as we have access to a sufficiently large pool of informed agents who share a common prior. Additionally, our proposal is easy to implement and intuitive to understand, with a straightforward payment scheme. In our preferred design, agents sequentially report predictions to a mechanism that terminates with some probability $\alpha$ after every prediction, and pays all but the final few agents the negative cross-entropy between their report and the final agent’s report. The final few agents receive a flat fee. The primary technical challenges in paying an agent based on a reference agent’s report are (1) in mitigating the incentive to strategically mislead a reference agent who observes the agent’s report, and (2) in mitigating the incentive to hedge towards a common prior if the reference agent does not observe their report (as in the output agreement mechanisms by Waggoner and Chen, 2014). Our key insight to mitigate these incentives is that giving the reference agent access to enough independent informational substitutes allows them to serve as a reasonable proxy for the ground truth. This lets us design a prediction market by making every agent’s reference agent the final agent in the same prediction market as long as they are sufficiently far removed from that final agent; otherwise they just receive a flat fee. We show that truthful reporting is a strict perfect Bayesian equilibrium, and also analyze the incentive to deviate from truthful reporting when the final agent is not sufficiently distant in expectation (i.e., analyze the $\varepsilon-$ PBE) under slightly milder conditions.
+
+#### Outline
+
+In Section 2, we present related work; in Section 3, we present our model; in Section 4, we present some essential background; in Section 5, we investigate incentives when scoring agents based on their peers’ reports; in Section 6, we propose self-resolving prediction markets; and conclude with a discussion in Section 7. All proofs are presented in Appendix D.
+
+## 2 Related Work
+
+Aumann’s agreement theorem (Aumann, 1976) considers a simple model of a pair of agents who share a common prior and shows that common knowledge of posteriors implies equal posteriors, i.e., the agents cannot not agree to disagree. Subsequent work (Geanakoplos and Polemarchakis, 1982; Milgrom and Stokey, 1982; Aaronson, 2005) further formalized a standard model of rational Bayesian agents sharing a common prior who repeatedly exchange information, finding that the agents must eventually reach agreement. In particular, Frongillo et al., 2021 and Kong and Schoenebeck, 2022 find that not only must agents eventually agree, but that when agents’ signals are ‘informational substitutes’ (Chen and Waggoner, 2016) (i.e., their pieces of information have diminishing marginal value), the eventual consensus also aggregates all their private information. While this line of work successfully introduces protocols to aggregate the private information of rational Bayesian agents into a ‘best guess,’ it does not consider incentives: how do we elicit true private beliefs? Our self-resolving prediction market can be thought of as an incentive scheme for the Aumannian protocol under a conditional independence of signals assumption.
+
+When a mechanism designer has eventual access to the ground truth, it is possible to reward agents for reporting beliefs that correspond closely to this ground truth. Standard approaches in such a setting include proper scoring rules (Brier et al., 1950; Good, 1952), and their extension to market scoring rules (Hanson, 2003) for use in prediction markets (Pennock and Sami, 2007) under certain conditions (Chen et al., 2010; Gao et al., 2013). Ostrovsky, 2009 further shows that markets can also aggregate information for a broad class of securities. Prediction markets have shown promise in forecasting events ranging from election outcomes (Berg et al., 2008) to the spread of infectious diseases (Polgreen et al., 2007) to even the replicability of scientific experiments (Dreber et al., 2015), leading some to propose conditional prediction markets or decision markets for use in decision-making (Hanson, 1999; Othman and Sandholm, 2010; Chen et al., 2011; Chen and Kash, 2011; Chen et al., 2014). These approaches typically run prediction markets for each possible action and use a decision rule to determine the course of action based on market predictions. However, these methods still pay out based on some eventual outcome, require randomizing over actions (i.e., every action has a non-zero probability of being chosen), and these methods may not elicit causal information
+11
+ 1
+
+ For example, a conditional prediction market on mortality rates with and without some health intervention might suggest that mortality is higher under the health intervention even if the intervention works, simply because the intervention may only be politically feasible if mortality is high, i.e., causation runs the other way. (usually what the decision-maker wishes to elicit). Unlike our mechanism, these approaches do not work in contexts where the decision-maker seeks unverifiable information.
+
+The information elicitation without verification (IEWV) literature explores the problem of incentivizing agents to reveal private information when the ground truth is inaccessible, costly to access, or subjective; naturally the best one can do in such a situation is to compare agents’ reports in clever ways so that truthful reporting is an equilibrium. This line of work considers wide-ranging applications such as data-labeling, peer grading, online rating systems, and the evaluation of causal effects. The simplest approach is the output agreement mechanism (Von Ahn and Dabbish, 2004; Waggoner and Chen, 2014)
+that directly pays agents based on how similar their response is to that of a reference agent, but this only elicits ‘common knowledge’ information, not agents’ true beliefs. On the other hand, early major efforts to elicit true signals in an incentive-compatible way include peer prediction (Miller et al., 2005) and Bayesian truth serum (Prelec, 2004), as well as subsequent extensions (Kong and Schoenebeck, 2019) to more general settings: (1) minimal mechanisms requiring only a single report from the agent (Witkowski and Parkes, 2013; Kong et al., 2020), (2) incentive-compatibility for small populations (Witkowski and Parkes, 2012a), (3) allowing for heterogeneous agents (Han et al., 2021), (4) allowing for non-binary signals to agents (Radanovic and Faltings, 2013), (5) incentivizing effort (Witkowski et al., 2013; Radanovic et al., 2016), (6) relaxing the common prior assumption (Witkowski and Parkes, 2012b; Radanovic and Faltings, 2015), (7) explicitly modeling adversarial agents (Schoenebeck et al., 2021), and (8) reducing the appeal of uninformative equilibria (Schoenebeck and Yu, 2020; Shnayder et al., 2016; Agarwal et al., 2020; Liu et al., 2020), where every agent simply makes the same report regardless of their private signal. The challenge of persistent uninformative equilibria can be particularly significant (Gao et al., 2016); when a mechanism rewards an agent when their response matches a peer’s, how do we prevent all agents from just making the same report regardless of their private signal to maximize reward? The most common approaches assume access to a large number of IID tasks (the multi-task setting) and leverage statistical relationships between agent reports to ensure that uninformative equilibria pay less than informative equilibria. In our harder single-task setting, recently proposed solutions (Kong and Schoenebeck, 2019; Schoenebeck and Yu, 2020; Srinivasan and Morgenstern, 2021) typically rely on paying agents based on some kind of ‘improvement’ over peers; these works are some of the most general solutions to the elicitation problem we consider, but do not handle aggregation and can be impractical for eliciting information from a large number of agents. In general, the IEWV literature focuses on eliciting truthful information, and does not typically consider the problem of aggregating information. Frongillo et al., 2015 do consider elicitation for aggregation, but make strong parametric assumptions on agents’ information structures. Despite ‘sequential’ mechanisms where agents observe and update on other agents’ reports being a natural way to aggregate information, the IEWV literature has primarily focused on eliciting information from agents in ‘parallel’; existing work on sequential peer prediction (Feng et al., 2022; Liu and Chen, 2017) primarily explores learning dynamics. By contrast, our proposed mechanism is an incentive-compatible sequential mechanism that efficiently aggregates information in the single-task setting and pays zero in uninformative equilibria. We also note that empirical evaluation of such mechanisms has been more limited, with mixed results (Gao et al., 2014; Karger et al., 2021; Debmalya et al., 2020) that depend on specific design details like the presence of uninformative equilibria or effortful agents.
+
+Finally, we note some other related strands of work. Freeman et al., 2017 propose decentralized outcome resolution for a prediction market by separately eliciting votes for the true outcome from ‘arbiters’ using peer prediction; our work embeds the resolution directly into the mechanism and does not require the eventual outcome to be observable at all. Our model for how agents observe and update their beliefs is similar to the sequential social learning models in the social learning literature (Golub and Sadler, 2017). McLean and Postlewaite, 2002 establish a conceptually similar result to ours – efficient allocation can be approximately incentive-compatible even when the state of the world is not observed if agents are ‘informationally small’ (i.e., no single agent’s private information significantly alters the aggregate inference of the state). However, since agents’ utilities are directly tied to the true state in their model (as opposed to being determined solely by the mechanism’s payoff structure), their mechanism does not face the challenge of uninformative equilibria where agents make uniform reports, which is a ‘default’ behavior in pure information elicitation settings like peer prediction. Thus, our work can be thought of as engineering the idea of ‘informational smallness’ into a sequential mechanism with market scoring rules primarily in a peer prediction setting.
+
+## 3 Model
+
+Our goal is to elicit and aggregate continuous, probabilistic predictions about some binary22
+ 2
+
+ In the case of categorical outcomes, one can run a $1$ -vs-all prediction market, and for continuous outcomes, one can discretize the outcome space and run binary prediction markets as well. Care should be taken in interpreting such predictions; if the outcomes follow a fat-tailed distribution, tail probabilities may be hard to elicit and could have catastrophic consequences (Taleb et al., 2023). Yes/No outcome $Y$ from agents with heterogeneous beliefs. We write the space of outcomes as $\Omega_{Y}=\{0,1\}$ and index outcome $\omega_{i}\in\Omega_{Y}$ as $Y_{i}$ . Every agent $j$ has a discrete and finite signal space $\Omega_{\hat{X}^{(j)}}$ , and receives one of $N_{j}$ possible signals, with $N_{j}\in\mathbb{Z}_{+}$ .
+
+#### Peer Prediction
+
+We consider an agent $t$ and their reference agent $r$ from whom we will elicit predictions about some outcome $Y$ . Agent $t$ has access to their own private signal ${X}^{(t)}$ not available to agent $r$ . Similarly agent $r$ has access to private signal $X^{(r)}$ not available to agent $t$ . Both agents have access to some shared signal $X^{(s)}$ is common knowledge. Thus, the full set of information available to agents $t$ and $r$ is $\hat{X}^{(t)}=\{X^{(t)},X^{(s)}\}$ and $\hat{X}^{(r)}=\{X^{(r)},X^{(s)}\}$ respectively. We assume that agents’ signals $x^{(j)}\in\Omega_{X^{(j)}}$ are drawn from a common prior $\mathbb{P}(Y,X^{(r)},X^{(t)},X^{(s)})$ . Upon observing their private signals, agent $t$ arrives at their posterior over $Y$ through Bayesian updating as ${\bf p}^{(t)}=\mathbb{P}(Y|x^{(t)},x^{(s)})=\mathbb{P}(Y|\hat{x}^{(t)})$ . Agent $t$ may then strategically report their posterior to the mechanism as ${\bf q}^{(t)}=\sigma\left(\hat{x}^{(t)}\right)$ for some strategy $\sigma:{\Omega_{\hat{X}^{(t)}}}\rightarrow\Delta_{\Omega_{Y}}$ .
+Agent $r$ may or may not observe agent $t$ ’s report to the mechanism, and they arrive at a posterior $\tilde{\bf p}^{(r)}=\mathbb{P}(Y|\hat{x}^{(r)},{\bf q}^{(t)})$ or $\tilde{\bf p}^{(r)}=\mathbb{P}(Y|\hat{x}^{(r)})$ accordingly. Agent $r$ then reports their own posterior to the mechanism ${\bf q}^{(r)}$ , and the mechanism pays agent $t$ the negative cross-entropy between the reference agent’s prediction ${\bf q}^{(r)}$ and their prediction ${\bf q}^{(t)}$ .
+
+#### Prediction Market
+
+We consider a prediction market that elicits predictions from $M$ agents, arriving one at a time. Each agent participates exactly once at time-step $t$ , where they report a prediction ${\bf q}^{(t)}$ about the outcome $Y$ to the mechanism. The agent at time-step $t$ has access to a private signal $X^{(t)}=x^{(t)}$ drawn from a joint prior distribution over outcome and signals $\mathbb{P}(Y,X^{(1)},\ldots,X^{(M)})$ , as well as all previous reports to the mechanism ${\bf q}^{(1:t-1)}=\{{\bf q}^{(1)},\ldots{\bf q}^{(t)-1}\}$ . Agent $t$ conditions on this information $\hat{X}^{(t)}=\{X^{(t)},{\bf q}^{(1:t-1)}\}$ to arrive at a posterior $\tilde{\bf p}^{(t)}=\mathbb{P}(Y|x^{(t)},{\bf q}^{(1:t-1)})$ over $Y$ . Agent $t$ may then strategically report their posterior to the mechanism as ${\bf q}^{(t)}=\sigma\left(\hat{x}^{(t)}\right)$ for some strategy $\sigma:{\Omega_{\hat{X}^{(t)}}}\rightarrow\Delta_{\Omega_{Y}}$ . After each agent $t$ makes their report, the market terminates with probability $\alpha$ ; for all but the last $k$ agents (who receive a flat payout), the terminal agent in the same prediction market is the reference agent $r$ . The reference agent $r$ observes all previous forecasts in the prediction market and arrives at a posterior $\tilde{\bf p}^{(r)}=\mathbb{P}(Y|{x}^{(r)},{\bf q}^{(1:r-1)})$ . The mechanism then pays agent $t$ based on how much their prediction ${\bf q}^{(t)}$ improves the negative cross-entropy with respect to the reference agent’s prediction ${\bf q}^{(r)}$ compared over the previous agent’s prediction ${\bf q}^{(t-1)}$ .
+
+#### Notation
+
+We use index $t$ to refer to the primary agent we are considering, index $r$ to refer to the reference agent whose prediction will be used to determine agent $t$ ’s payoff, and index $j$ to refer to an arbitrary agent. We denote an agent $j$ ’s truthful but potentially misinformed posterior (from observing other agents’ reports and believing those to have been truthful) as $\tilde{\bf p}^{(j)}$ . If the reports of other agents were in fact truthful, we denote agent $j$ ’s truthful and accurately informed posterior as ${\bf p}^{(j)}$ . Similarly, we denote an agent $j$ ’s strategic and potentially misinformed report as $\tilde{\bf q}^{(j)}$ and their strategic but accurately informed report as ${\bf q}^{(j)}$ . We also use ${\bf r}$ to denote a reference agent $r$ ’s reported posterior when the details of how they arrived at their posterior do not matter. Generally, we use superscripts to indicate agents and subscripts to index a particular signal/outcome. We denote the common prior probability that $Y=1$ and $Y=0$ as $y_{1}$ and $y_{0}$ respectively, and the prior vector as ${\bf y}$ .
+
+### 3.1 Assumptions
+
+Here we present some standard assumptions about agents’ signals and the information they possess. The first two assumptions have to do with the common knowledge that potentially heterogeneous agents have regarding their priors and Bayesian rationality. These assumptions let us treat agents’ reactions to new information with Bayes’ rule in a consistent manner.
+
+###### Assumption 1 (Common Knowledge of Rationality and Risk Neutrality).
+
+We assume that the agents are risk neutral and fully rational Bayesian agents and this is common knowledge.
+
+###### Assumption 2 (Common Knowledge of Common Prior).
+
+We assume that the agents’ signals $X^{(t)}$ and outcome $Y$ are drawn from a common prior $\mathbb{P}(Y,X^{(1)},\ldots,X^{(M)})$ that is common knowledge.
+
+Our next assumption restricts the class of information structures we study. The common stochastic relevance assumption amounts to claiming that every agent’s signal induces a unique posterior over $Y$ . This allows agents to invert other agents’ posteriors to infer their signal. Without this property, it would be challenging to reason about what agents know when they see another agent’s forecast. This is a standard assumption, and it is plausible; practically, if two different signals induce the same posterior, we can simply ‘group’ and relabel the two signals as a single signal, and update the prior accordingly. This is also sometimes referred to as ‘distinct signals’ assumption.
+
+###### Assumption 3 (Stochastic Relevance).
+
+We assume that all agents’ signals are stochastic relevant with respect to the event of interest, i.e., $\mathbb{P}(Y|X^{(j)}=x)\neq\mathbb{P}(Y|X^{(j)}=\tilde{x})$ for all $x\neq\tilde{x}$ .
+
+Next, we restrict our attention to information structures where agents’ signals are conditionally independent given the ground truth. This essentially amounts to an assumption that agents’ signals are informational substitutes (Chen and Waggoner, 2016), i.e., signals’ informativeness has diminishing marginal value. Although this restricts the class of information structures we study, these are the same class of information structures for which we can guarantee that standard prediction markets (where agents paid based on verifiable outcomes) are incentive-compatible (Chen et al., 2010).
+
+###### Assumption 4 (Conditional Independence).
+
+We assume that agents’ signals are independent given the outcome $Y$ , i.e., $X^{(j)}\perp\!\!\!\!\perp X^{(j^{\prime})}\mid Y$ for all $j\neq j^{\prime}$ .
+
+Before stating our final assumption, we introduce a notion of ‘distance’ between distributions we will use to compare $\mathbb{P}(X^{(t)}|Y=0)$ and $\mathbb{P}(X^{(t)}|Y=1)$ : the Bhattacharyya coefficient.
+
+###### Definition 1 ( $(1-\delta^{(j)})$ -Bhattacharyya Coefficient).
+
+The Bhattacharyya coefficient of agent $j$ ’s information structure with conditional probability table $\mathbb{P}(X^{(j)}|Y)$ is
+
+ | 
+ | $\text{BC}\left(\mathbb{P}(X^{(j)}|Y=0),\mathbb{P}(X^{(j)}|Y=1)\right)=\sum_{i=1}^{N_{j}}\sqrt{\mathbb{P}(X_{i}^{(j)}|Y=0)\cdot\mathbb{P}(X_{i}^{(j)}|Y=1)}={1-\delta^{(j)}}$ 
+ | 
+
+Equivalently, the Bhattacharyya distance between the conditional distributions is
+
+ | 
+ | $D_{B}\left(\mathbb{P}(X^{(j)}|Y=0),\mathbb{P}(X^{(j)}|Y=1)\right)=-\ln\left({1-\delta^{(j)}}\right)$ 
+ | 
+
+Observe that when the Bhattacharyya coefficient $(1-\delta^{(j)})$ is strictly less than 1, it means the columns of $\mathbb{P}(X^{(j)}|Y)$ are not identical, i.e., $\mathbb{P}(X^{(j)}|Y=0)\neq\mathbb{P}(X^{(j)}|Y=1)$ or equivalently $X^{(j)}\not\perp\!\!\!\!\perp Y$ . Indeed, we have the property that $1-\delta^{(j)}3); at most one row of $\mathbb{P}(X^{(j)}|Y)$ can have identical probabilities, otherwise multiple signals would produce a likelihood ratio of 1 and hence identical posteriors.
+
+With this context, we introduce our final assumption of $(\delta,\eta)-$ informative signals – our only departure from the standard set of assumptions made in the prediction markets literature, though such assumptions have been studied in the social learning literature (Golub and Sadler, 2017). $\delta-$ informativeness is essentially a ‘global minimum informedness’ condition, requiring that
+all agents’ Bhattacharyya coefficients are upper bounded by some $1-\delta$ , i.e., $\sup_{j}1-\delta^{(j)}=1-\delta0$ . This assumption ensures that the information gained by adding agents to our prediction market doesn’t diminish too quickly. This is a plausible assumption since in practice, it is (1) highly unlikely that agents will have arbitrarily powerful/informative signals – $\eta$ -informativeness asserts a sensible constraint that there is an upper limit on how much a signal can update an agent’s prior; and (2) highly unlikely that agents will have arbitrarily uninformative signals – $\delta$ -informativeness asserts a lower limit on how close agents’ sampling distributions can be for $Y=1$ vs. $Y=0$ .
+
+###### Assumption 5 (All Agents Have $(\delta,\eta)$ -informative Signals).
+
+We assume that all agents’ signals are $(\delta,\eta)$ -informative, i.e., we have $\text{BC}\left(\mathbb{P}(X^{(j)}|Y=0),\mathbb{P}(X^{(j)}|Y=1)\right)\leq{1-\delta}$ for all $j$ for some $\delta>0$ , and also that $\min_{x,\omega}\mathbb{P}(X^{(j)}=x|Y=\omega)\geq\eta$ for all $j$ and some $\eta>0$ .
+
+Finally, we introduce the notion of $\tau-$ granularity, which captures the smallest distance between the log likelihood ratios of two distinct signals for a given agent. This is always defined since the signal space is discrete and finite. Small $\tau$ implies that the agent has at least two signals that induce similar posteriors, while larger $\tau$ implies that the agent’s posteriors are substantially different under different signals. This determines the degree to which an agent is inclined to pass off one signal as the other, so we will use it to establish our mechanism’s strict truthfulness. For convenience, we treat $\tau$ as the same for all agents; our analysis of strict truthfulness still applies if this differs across agents, but the condition for strict truthfulness would vary by agent’s $\tau$ -granularity.
+
+###### Definition 2 ( $\tau-$ granularity).
+
+Let $\lambda_{x}=\log\left(\frac{\mathbb{P}(x|Y=1)}{\mathbb{P}(x|Y=0)}\right)$ . The granularity of an agent $j$ ’s signal space is $\tau^{(j)}$ where $\tau^{(j)}=\min_{x,x^{\prime}\in\Omega_{X^{(j)}}}|\lambda_{x}-\lambda_{x^{\prime}}|$ .
+
+## 4 Background
+
+We now present background on scoring rules and prediction markets to set up our main results.
+
+###### Definition 3 (Scoring Rules, Proper Scoring Rules, and Strictly Proper Scoring Rules).
+
+A scoring rule is a function $S:\Omega\times\Delta_{\Omega}\rightarrow\mathbb{R}$ that scores a probabilistic prediction ${\bf q}\in\Delta_{\Omega}$ against an outcome $\omega_{i}\in\Omega$ . A scoring rule is proper if, whenever the outcome $\omega_{i}$ is drawn from the distribution ${\bf p}\in\Delta_{\Omega}$ , the expected score $\mathbb{E}_{i\leftarrow{\bf p}}[S(i,{\bf p})]\geq\mathbb{E}_{i\leftarrow{\bf p}}[S(i,{\bf q})]$ for any ${\bf q}\neq{\bf p},{\bf q}\in\Delta_{\Omega}$ . If this inequality is strict, the scoring rule is strictly proper.
+
+Strictly proper scoring rules incentivize truthful reports of the belief of the distribution that outcomes $\omega$ are drawn from, as this strictly maximizes the expected reward. A commonly used scoring rule is the log scoring rule, which is the basis for the cross-entropy scoring rule used throughout this paper.
+
+###### Definition 4 (Log Scoring Rule).
+
+The log scoring rule is a proper scoring rule where $S(i,{\bf q})=\log q_{i}$ .
+
+Next, we present the cross-entropy scoring rule, which we will use to score agents against each other (like in peer prediction) with the goal of resolving agent payoffs without ground truth.
+
+###### Definition 5 (Cross-Entropy Scoring Rule).
+
+Given an agent’s report ${\bf q}$ and a reference prediction ${\bf r}\in\Delta_{\Omega}$ , the cross-entropy scoring rule is the negative cross-entropy between the distributions, i.e., $S_{CE}({\bf r},{\bf q})=-H({\bf r},{\bf q})=\sum_{i}r_{i}\log q_{i}$ .
+
+The cross-entropy scoring rule is not quite a scoring rule in the sense of Definition 3, since it scores an agent’s probabilistic prediction against another probabilistic prediction, as opposed to a discrete outcome.
+While we could sample from the reference agent’s prediction and use the log scoring rule to pay the agent, this would unnecessarily increase the variance in payouts. Instead, we can just ‘take the expectation’ with respect to the log scoring rule, which amounts to a negative cross-entropy payoff: $\mathbb{E}_{i\leftarrow{\bf r}}[\log{q}_{i}]=\sum_{i}r_{i}\log q_{i}=-H({\bf r},{\bf q})$ .
+As such, it inherits the property that for any fixed r, we have $\max_{\bf q}S_{CE}({\bf r},{\bf q})=S_{CE}({\bf r},{\bf r})$ . Of course, agents do not know what the reference agent will report, and so seek to maximize their expected payoff by reporting their expectation of ${\bf r}$ : $\mathbb{E}_{{\bf r}}[S_{CE}({\bf r},{\bf q}^{(t)})]=\mathbb{E}\left[\sum_{i}r_{i}\log\left(q^{(t)}_{i}\right)\right]=\sum_{i}\mathbb{E}\left[r_{i}\right]\log\left({q^{(t)}_{i}}\right)=-H\left(\mathbb{E}\left[{\bf r}\right],{\bf q}^{(t)}\right)$ .
+
+#### Prediction Markets
+
+In a standard prediction market, agents may buy and sell securities that pay out a fixed amount contingent on the occurrence of some future event, usually facilitated through a continuous double auction (CDA) or automated market maker (AMM). Chen and Pennock, 2012 showed that a prediction market with a cost function-based automated market maker where agents change market prices by making trades can equivalently be implemented with market scoring rules (MSR) (Hanson, 2003) where agents report their forecast directly to the mechanism and are paid based on how much they improve the market prediction. This work will use MSRs with cross-entropy scoring rules to directly elicit predictions from agents and determine payoffs, although we show how our mechanism can be cast as one in which agents trade securities in Section 6.3.
+
+###### Definition 6 ( $S$ -Market Scoring Rule).
+
+An $S-$ market scoring rule is a sequential and shared proper scoring rule that pays agents the difference in score (according to the given proper scoring rule $S$ ) between their forecast and the prior forecast, i.e., the payoff is $S(i,{\bf q}^{(t)})-S(i,{\bf q}^{(t-1)})$ where $S$ is the given proper scoring rule.
+
+###### Definition 7 (Cross-Entropy Market Scoring Rule (CE-MSR)).
+
+Given agent $t$ ’s prediction ${\bf q}^{(t)}$ , market prediction ${\bf q}^{(t-1)}$ and a reference prediction ${\bf r}$ , the cross-entropy market scoring rule is $S_{CEM}({\bf r},{\bf q}^{(t)},{\bf q}^{(t-1)})=-H({\bf r},{\bf q}^{(t)})+H({\bf r},{\bf q}^{(t-1)})=\sum_{i}r_{i}\log\left(\frac{q^{(t)}_{i}}{q^{(t-1)}_{i}}\right)$ .
+
+Just like with cross-entropy scoring rules, the CE-MSR incentivizes agents to predict their reference agent’s expected prediction, since $\mathbb{E}_{{\bf r}}[S_{CEM}({\bf r},{\bf q}^{(t)},{\bf q}^{(t-1)})]=-H\left(\mathbb{E}\left[{\bf r}\right],{\bf q}^{(t)}\right)+H\left(\mathbb{E}\left[{\bf r}\right],{\bf q}^{(t-1)}\right)$ , which is maximized by setting ${\bf q}^{(t)}=\mathbb{E}[{\bf r}]$ .
+
+#### Informational Substitutes
+
+Building on Definition 4, we further present two key intuitions about our conditional independence assumption (equivalent to a kind of informational substitutes assumption). First, observe that under such an assumption, in the standard Aumannian protocol where $n$ agents announce their posteriors in sequence (Observation B.1 by Kong and Schoenebeck, 2022), every agent’s posterior is equal to $\mathbb{P}(Y|X_{1},\ldots,X_{n})$ after a single round; agents do not need to repeatedly exchange posteriors. In other words, whenever an agent announces their beliefs, previous agents learn new information but have nothing new to contribute. This is the same reason why we have an ‘all-rush’ equilibrium in standard prediction markets (Chen et al., 2010) where every agent rushes to reveal their private information and only needs to participate once in the mechanism. This allows our mechanism to aggregate historical information with a single round of elicitation. Second, observe that when combined with stochastic relevance (Assumption 3), an agent can invert a sequence of predictions to obtain the sequence of signals that each agent observed. This allows agents to be confident that subsequent agents who observe their prediction will know everything they know, and so be able to aggregate all historical information efficiently (see Lemma 4 by Chen et al., 2010).
+
+#### Perfect Bayesian Equilibrium
+
+A Perfect Bayesian Equilibrium (PBE) is game-theoretic solution concept for sequential Bayesian games with incomplete information that specifies a strategy profile (every agent’s action for every possible information set) and belief profile (every agent’s belief at every information set arrived at through Bayes’ rule where possible) such that no agent can gain in expectation by unilateral deviation. A PBE must also specify off-the-equilibrium-path beliefs consistent with the strategy profile, i.e., beliefs formed after an unexpected move, to ensure that the equilibrium captures not only optimal behavior but also reasonable expectations in every possible contingency. An $\varepsilon-$ PBE specifies a strategy and belief profile under which no agent can gain more than $\varepsilon$ payoff in expectation by unilateral deviation.
+
+## 5 Incentives under Cross-Entropy Scoring Rules
+
+In this section, we investigate agents’ beliefs about other agents’ beliefs and agents’ incentives under cross-entropy scoring rules, independent of any particular prediction market design. Specifically, we study the natural question of whether there is a mismatch between what cross-entropy scoring rules incentivize (predicting the reference agent’s prediction) and what the mechanism designer wants to elicit (beliefs about some random variable $Y$ ). First, we establish the number of agents required so that truthful reporting strictly maximizes the agent’s expected payoff. Subsequently, we establish an upper bound on agents’ gain in reward by deviating from truthful reporting under a slightly milder condition: when $\tau-$ granularity is not known.
+
+#### Setup
+
+Suppose agents $t$ and $r$ have private information $x^{(t)}$ and $x^{(r)}$ respectively, and shared information $x^{(s)}$ that is common knowledge. The agents share a common prior $\mathbb{P}(Y,X^{(r)},X^{(t)},X^{(s)})$ over $Y$ with marginal prior over $Y$ denoted ${\bf y}=P(Y)$ .
+Now, suppose agent $t$ reports their posterior over $Y$ as ${\bf q}^{(t)}$ . If agent $r$ observes ${\bf q}^{(t)}$ associated with some signal $X^{(t)}=\tilde{x}^{(t)}$ , agent $r$ updates their beliefs as if they observed $X^{(t)}=\tilde{x}^{(t)}$ (agents can invert posteriors to obtain the signal under Assumption 3). If ${\bf q}^{(t)}$ is not consistent with agent $t$ ’s information structure, agent $r$ may either ignore it or update as if they observed some arbitrary $X^{(t)}=\tilde{x}^{(t)}$ . If agent $r$ does not observe this report, they take $X^{(t)}=\emptyset$ and make no update to their belief. We further assume that agent $r$ reports their true (but potentially misinformed) posterior $\tilde{\bf p}^{(r)}$ .
+
+### 5.1 What Agents Believe Other Agents Believe
+
+Before discussing incentives, we seek to understand agents’ beliefs about other agents’ beliefs given the information they have. Reference agent $r$ may observe agent $t$ ’s report, so agent $t$ may be able to strategically mislead agent $r$ toward a preferred prediction if agent $r$ believes and updates on this information. Below, we characterize how agent $t$ ’s expectation of agent $r$ ’s belief depends on their own report and private signal.
+
+###### Lemma 1.
+
+Agent $t$ ’s expectation of agent $r$ ’s true posterior ${\tilde{p}}_{1}^{(r)}=\mathbb{P}(Y=1|x^{(r)},\tilde{x}^{(t)},x^{(s)})$ is:
+
+ | 
+ | $\small\mathbb{E}[{\tilde{p}}_{1}^{(r)}|x^{(t)},x^{(s)}]=\mathbb{P}(Y=1|x^{(t)},x^{(s)})+\Delta(\Omega_{X_{r}},\tilde{x}^{(t)},{x}^{(t)},x^{(s)})$ 
+ | 
+ | (1)
+
+where $\Delta(\Omega_{X_{r}},\tilde{x}^{(t)},{x}^{(t)},x^{(s)})=\mu(\Omega_{X_{r}},\tilde{x}^{(t)},x^{(s)})\cdot\rho(\tilde{x}^{(t)},x^{(t)},x^{(s)})$ , with
+
+ | 
+ | $\small\begin{split}\mu(\Omega_{X_{r}},\tilde{x}^{(t)},x^{(s)})&=\sum_{x^{(r)}\in\Omega_{X_{r}}}\frac{1}{\frac{1}{\mathbb{P}(x^{(r)},Y=1|\tilde{x}^{(t)},x^{(s)})}+\frac{1}{\mathbb{P}(x^{(r)},Y=0|\tilde{x}^{(t)},x^{(s)})}}\\
+\rho(\tilde{x}^{(t)},x^{(t)},x^{(s)})&=\frac{\mathbb{P}(Y=1|\tilde{x}^{(t)},x^{(s)})-\mathbb{P}(Y=1|x^{(t)},x^{(s)})}{\mathbb{P}(Y=0|\tilde{x}^{(t)},x^{(s)})\cdot\mathbb{P}(Y=1|\tilde{x}^{(t)},x^{(s)})}\end{split}$ 
+ | 
+ | (2)
+
+#### Understanding Lemma 1
+
+Lemma 1 shows that agent $t$ ’s expectation of agent $r$ ’s true posterior is their own true posterior adjusted by a term $\Delta=\mu\cdot\rho$ that moves the agent’s true posterior towards their posterior under $\tilde{x}^{(t)}$ . Thus, agent $t$ ’s report influences their own expectation of agent $r$ ’s prediction, giving agent $t$ an additional degree of freedom. Since we wish to elicit agents’ true beliefs, the next question that arises is: under what conditions does the adjustment term $\Delta$ disappear, such agent $t$ ’s expectation of agent $r$ ’s prediction is their own true posterior? Observe that the adjustment term does not disappear by hiding agent $t$ ’s report from agent $r$ (i.e., $\tilde{x}^{(t)}=\emptyset$ ), nor by making all information private (i.e., $x^{(s)}=\emptyset$ ); this simply prompts an adjustment towards the posterior an independent observer would have without access to $\tilde{x}^{(t)}$ or $x^{(s)}$ or both. However, when an agent does report their true posterior ( $\tilde{x}^{(t)}=x^{(t)}$ ) and the reference agent observes and updates on this, $\rho(x^{(t)},{x}^{(t)},x^{(s)})=0$ and we have the following result:
+
+###### Corollary 1 (Martingale Property of Truthful Report).
+
+If agent $t$ truthfully reports their private signal $\tilde{x}^{(t)}=x^{(t)}$ and agent $r$ observes and believes this, agent $t$ ’s expectation of agent $r$ ’s posterior of $Y$ equals their own posterior of $Y$ , i.e., $\mathbb{E}[{{p}}_{1}^{(r)}|x^{(t)},x^{(s)}]=\mathbb{P}(Y=1|x^{(t)},x^{(s)})$ .
+
+This martingale property of posteriors is a known result, particularly in the literature exploring Aumann’s agreement theorem (Aaronson, 2005).
+Yet, Corollary 1 does not shed any light on how to design a mechanism in which $\Delta$ vanishes and agents are best off reporting their true beliefs. In particular, when agent $r$ updates on agent $t$ ’s report, agent $t$ wants to report predictions that will be close to the reference agent’s prediction (achieved by truthful reporting) but also nudge the reference agent towards greater certainty (achieved by reporting signals that induce more extreme beliefs in the reference agent). This arises from the strict convexity of negative cross-entropy, since highly certain predictions that agree have lower cross-entropy (and so higher payoff) than uncertain predictions that agree (see example in Appendix A). Separately, if agent $r$ does not observe agent $t$ ’s report, agent $t$ is incentivized to move their prediction towards the common prior, a dynamic that can lead to ‘coarsening’ of elicited information (Waggoner and Chen, 2014).
+We make further progress by identifying a condition under which the adjustment term $\Delta$ diminishes: when the reference agent has access to enough informational substitutes that agent $t$ cannot access.
+
+###### Theorem 1.
+
+Suppose a reference agent $r$ can observe $k$ private signals $x^{(1)},\ldots,x^{(k)}$ that are informational substitutes, where $\Omega_{X^{(r)}}=\Omega_{X^{(1)}}\times\ldots\times\Omega_{X^{(k)}}$ and $x^{(j)}\in\Omega_{X^{(j)}}$ , and agent $t$ cannot observe these signals. Then, agent $t$ ’s adjustment $\Delta$ of their posterior to predict their reference agent’s true posterior is upper bounded in magnitude as $|\Delta(\Omega_{X_{r}},\tilde{x}^{(t)},x^{(t)},x^{(s)})|\leq\frac{1}{4}\left({{\frac{1-\eta}{\eta}}}-{{\frac{\eta}{1-\eta}}}\right)\left(1-\delta\right)^{k}$ .
+Consequently, we have an upper bound $|\Delta|\leq\varepsilon^{\prime}$ for any $k$ where
+
+ | 
+ | $\small k\geq\frac{1}{-\log\left(1-\delta\right)}\log\left(\frac{1}{4\varepsilon^{\prime}}\left({{\frac{1-\eta}{\eta}}}-{{\frac{\eta}{1-\eta}}}\right)\right)$ 
+ | 
+ | (3)
+
+#### Understanding Theorem 1
+
+This result shows that we can focus on designing mechanisms that provide agent $r$ with a minimum number of $k$ informational substitutes that agent $t$ does not have access to. Observe that for any desired upper bound $\varepsilon^{\prime}$ on the adjustment term $\Delta$ , $k$ scales logarithmically with $\frac{1}{\varepsilon^{\prime}}$ , logarithmically33
+ 3
+
+ This scaling is additionally promising because $\eta$ can get quite small as signal spaces get larger; our result shows that an exponential increase in signal space only linearly increases the need for informational substitutes. with $\frac{1}{\eta}$ , and inversely with the upper bound of the Bhattacharyya distance of agents’ information structures, i.e., as $\frac{1}{-\log(1-\delta)}$ .
+The key insight is that with enough informational substitutes, agent $r$ ’s true belief becomes a reasonable proxy for the ground truth. Thus, agent $t$ can only have a small effect on agent $r$ ’s belief even if agent $r$ observes their report (i.e., the $k$ informational substitutes essentially ‘wash out’ the impact of agent $t$ ’s report on agent $r$ ).
+
+### 5.2 Peer Prediction under Cross-Entropy Scoring Rules
+
+Having characterized what agent $t$ expects their reference agent’s belief to be, we turn our attention to incentives under cross-entropy scoring rules.
+
+Specifically, we extend our analysis to show that agent $t$ strictly maximizes their payoff by reporting their true belief when agent $r$ ’s has enough information. The reasoning is this: by Theorem 1, agent $t$ ’s influence on agent $r$ ’s belief diminishes with the amount of information agent $r$ has, which we show translates to a diminishing influence on their payoff; given a discrete and finite signal space, agent $r$ ’s update will be consistent with some signal that agent $t$ could have reported (otherwise, agent $r$ ignores it). Then, as we increase the number of informational substitutes that the reference agent has, the set of reports that agent $t$ could profitably deviate to dwindles. There finally comes a point (determined by agent $t$ ’s $\tau$ -granularity where no signal that agent $t$ could credibly claim to observe would successfully persist to ‘wash out’ the reference agent’s information. We state this formally:
+
+###### Theorem 2 (Minimum Reference Signals for Strict Truthfulness).
+
+Suppose agent $t$ is paid based on a cross-entropy scoring rule with respect to agent $r$ who reports truthfully. Then, agent $t$ strictly maximizes their expected payoff by reporting truthfully if the reference agent has at least $k$ signals where
+
+ | 
+ | $\small k>\frac{1}{-\log\left(1-\delta\right)}\log\left(\frac{\left|\log\left(\frac{y_{1}(1-\eta)^{2}}{y_{0}\eta^{2}}\right)\right|\left({{\frac{1-\eta}{\eta}}}-{{\frac{\eta}{1-\eta}}}\right)}{8\left(\eta(1-\eta)\tau\right)^{2}}\right)$ 
+ | 
+ | (4)
+
+Now, this result depends on the $\tau-$ granularity of agent $t$ ’s signal; this isn’t an assumption but comes directly from our model and may not be easily known by the mechanism designer. In order to provide a result that doesn’t depend on the $\tau$ -granularity, we can translate the guarantee that agent $t$ ’s expectation of agent $r$ ’s belief is within some desired $\varepsilon^{\prime}$ of their own true belief to an upper bound on the gain in deviating from truthful reporting with the following:
+
+###### Theorem 3 (Upper Bound in Deviating from Truthful Reporting under Cross-Entropy Scoring Rules).
+
+If agent $t$ is paid based on a cross-entropy scoring rule with respect to agent $r$ who reports truthfully, the difference in expected payoff when deviating from truthful report ${\bf p}^{(t)}$ associated with signal $x^{(t)}$ to misreport ${\bf q}^{(t)}$ is:
+
+ | 
+ | $\small\mathbb{E}[S_{CE}({\bf q}^{(t)})|x^{(t)},x^{(s)}]-\mathbb{E}[S_{CE}({\bf p}^{(t)})|x^{(t)},x^{(s)}]\leq\mathcal{D}_{\eta}(\Delta,{\bf y})$ 
+ | 
+ | (5)
+
+where ${\bf y}$ is the prior and
+
+ | 
+ | $\small\mathcal{D}_{\eta}(\Delta,{\bf y})=\Delta\cdot\log\left(\frac{({1-\eta})y_{1}+\Delta\cdot\left(\eta y_{0}+({1-\eta}){y_{1}}\right)}{\eta y_{0}-\Delta\cdot\left(\eta y_{0}+({1-\eta}){y_{1}}\right)}\right)$ 
+ | 
+ | (6)
+
+###### Remark 1.
+
+As $k$ increases and $\Delta$ vanishes (by Theorem 1), the difference in expected rewards from misreporting also vanishes, i.e., $\lim_{\Delta\to 0}\mathcal{D}_{\eta}(\Delta,{\bf y})=0$ . Additionally, $\lim_{\Delta\to 0}\mathbb{E}[S_{CE}({\bf q}^{(t)})|x^{(t)},x^{(s)}]=-H({\bf p}^{(t)},{\bf q}^{(t)})$ , which is strictly maximized by truthful reporting ${\bf q}^{(t)}={\bf p}^{(t)}$ , i.e., agent $t$ ’s expected reward approaches the cross-entropy between their true posterior and their reported prediction.
+
+By Theorem 1, we know that we can make the adjustment term vanish by giving the reference agent access to enough informational substitutes. Now, we would ideally like to upper bound Equation 6 by some desired $\varepsilon$ , solve for an upper bound on $\Delta$ such that $\mathcal{D}_{\eta}(\Delta,{\bf y})\leq\varepsilon$ , and use this to determine the number of informational substitutes that agent $r$ needs through Equation 3 in Theorem 1. Unfortunately, $\mathcal{D}_{\eta}(\Delta,{\bf y})=\varepsilon$ is a transcendental equation, so we can only solve for $k$ numerically.
+Thus, we numerically solve for ${\varepsilon^{\prime}}=\min\{|\Delta|:\mathcal{D}_{\eta}(\Delta,{\bf y})=\varepsilon\}$ and compute the minimum number of informational substitutes $k_{min}$ that agent $r$ requires according to Theorem 1 for any setting of $\delta,\eta$ and choice of $\varepsilon$ . This guarantees that agent $t$ can gain no more than $\varepsilon$ by deviating from truthful reporting. We visualize the dependence of $k$ on these parameters in Appendix B, and find that parameter $\delta$ has the greatest impact on the $k$ .
+
+As a more general observation, we see from Lemma 1 that a simple ‘peer prediction’ payment of paying an agent based on agreement with a reference agent is not generally truthful, because of the incentive to mislead the reference agent or hedge towards the prior. Specifically, the core incentive issue arises from the strict convexity of negative cross-entropy, since highly certain predictions that somewhat agree have lower cross-entropy (and so higher payoff) than uncertain predictions that exactly agree (see example in Appendix A). Yet, by Theorem 2, it becomes truthful to pay based on agreement when the reference agent has access to enough conditionally independent signals that can ‘wash out’ the impact of agent $t$ ’s report on agent $r$ ’s belief. Although this result could be used in ‘parallel’ peer prediction settings where agents do have $k$ private informational substitutes, we find that the most natural design for a mechanism that both elicits and aggregates information is a ‘sequential’ peer prediction mechanism, structured as a prediction market.
+
+### 5.3 Prediction Markets with Cross-Entropy Market Scoring Rules
+
+Given the results above, we are left with the question of how best to pick a reference agent and how to give them access to the required informational substitutes. Prediction markets are a natural solution here, since we can either pick some future agent in the same prediction market or some agent in a separate, walled-off prediction market as the reference agent; in both cases, the reference agent can access $k$ informational substitutes that agent $t$ cannot. We defer a discussion of the details of the prediction market design to the next section, but this reasoning motivates the extension of our result from Theorem 6 on cross-entropy scoring rules to cross-entropy market scoring rules, where agent $t$ is paid based on how much their forecast ${\bf q}^{(t)}$ improves on the market prior (assumed to be the true prior ${\bf y}^{(t-1)}$ , arrived at by all previous agents reporting truthfully).
+
+First, identify the exact number of informational substitutes $k$ that the reference agent needs access to in order to achieve strict truthfulness, based on agent $t$ ’s $\tau-$ granularity:
+
+###### Theorem 4.
+
+Suppose agent $t$ is paid based on a cross-entropy market scoring rule with respect to agent $r$ who reports truthfully. Then, agent $t$ strictly maximizes their expected payoff by reporting truthfully if the reference agent has at least $k$ signals where
+
+ | 
+ | $\small k>\frac{1}{-\log\left(1-\delta\right)}\log\left(\frac{\left|\log\left(\frac{1-\eta}{\eta}\right)\right|\left({{\frac{1-\eta}{\eta}}}-{{\frac{\eta}{1-\eta}}}\right)}{8\left(\tau\eta(1-\eta)\right)^{2}}\right)$ 
+ | 
+ | (7)
+
+Now, we give an upper bound on the gain in expected payoff by misreporting signals that does not depend on knowing $\tau-$ granularity, for cases when the mechanism designer does not know $\tau$ :
+
+###### Theorem 5 (Upper Bound in Deviating from Truthful Reporting under Cross-Entropy Market Scoring Rules).
+
+If agent $t$ is paid based on a cross-entropy market scoring rule with respect to agent $r$ who reports truthfully, the difference in expected payoff when deviating from truthful report ${\bf p}^{(t)}$ associated with signal $x^{(t)}$ to misreport ${\bf q}^{(t)}$ is:
+
+ | 
+ | $\small\mathbb{E}[S_{CEM}({\bf q}^{(t)})|x^{(t)},x^{(1:t-1)}]-\mathbb{E}[S_{CEM}({\bf p}^{(t)})|x^{(t)},x^{(1:t-1)}]\leq\hat{\mathcal{D}}_{\eta}(\Delta,{\bf y}^{(t-1)})$ 
+ | 
+ | (8)
+
+where ${\bf y}^{(t-1)}$ is the true market prior before agent $t$ ’s report and
+
+ | 
+ | $\small\hat{\mathcal{D}}_{\eta}(\Delta,{\bf y}^{(t-1)})=\Delta\cdot\log\left(\frac{({1-\eta})+\Delta\cdot\left(\eta\frac{y_{0}^{(t-1)}}{y_{1}^{(t-1)}}+({1-\eta})\right)}{\eta-\Delta\cdot\left(\eta+({1-\eta})\frac{y_{1}^{(t-1)}}{y_{0}^{(t-1)}}\right)}\right)$ 
+ | 
+ | (9)
+
+###### Remark 2.
+
+As $k$ increases and $\Delta$ vanishes (by Theorem 1), the difference in expected rewards from misreporting also vanishes, i.e., $\lim_{\Delta\to 0}\hat{\mathcal{D}}_{\eta}(\Delta,{\bf y}^{(t-1)})=0$ . Additionally, agent $t$ ’s expected reward tends as $\lim_{\Delta\to 0}\mathbb{E}[S_{CEM}({\bf q}^{(t)})|x^{(t)},x^{(1:t-1)}]=-H({\bf p}^{(t)},{\bf q}^{(t)})+H({\bf p}^{(t)},{\bf y}^{(t-1)})$ which is strictly maximized under truthful reporting ${\bf q}^{(t)}={\bf p}^{(t)}$ .
+
+###### Remark 3.
+
+Since $\hat{\mathcal{D}}_{\eta}(\Delta,{\bf y}^{(t-1)})=\varepsilon$ is a transcendental equation, we can only numerically compute ${\varepsilon^{\prime}}=\min\{|\Delta|:\hat{\mathcal{D}}_{\eta}(\Delta,{\bf y}^{(t-1)})=\varepsilon\}$ . We can subsequently use this to compute the minimum number of informational substitutes $k_{min}$ (using Equation 3) that agent $r$ requires so the gain in deviating from truthful reporting is no more than $\varepsilon$ (according to Theorem 1). We visualize the dependence of $k$ on various settings of $\delta,\eta$ and choice of $\varepsilon$ in Figure 2 and Appendix B, observing that $k_{min}$ is much more sensitive to the choice of $\delta$ than $\varepsilon$ or $\eta$ .
+
+Figure 2: Minimum number of informational substitutes $k_{min}$ that the reference agent needs to guarantee that the incentive to deviate from truthful reporting is no more than $\varepsilon$ as a function of the prior market prediction $y_{1}^{(t-1)}$ , for different choices of $(\delta,\eta)$ when $\tau-$ granularity is not known. 
+
+## 6 Self-Resolving Prediction Markets
+
+In the previous section, we saw that if we use cross-entropy market scoring rules to score an agent $t$ against a reference agent with sufficient informational substitutes, agent $t$ strictly maximizes their payoff by reporting truthfully. In this section, we use this insight to propose our design for a self-resolving prediction market that does not need access to the true outcome. We show that it is a perfect Bayesian equilibrium for all agents to report their true beliefs and believe that all other agents report truthfully. In addition to eliciting information from agents, the prediction market design also naturally aggregates the predictions to provide a single prediction summarizing all elicited information. There are several possible ways to design such a self-resolving prediction market, and we begin with our preferred design.
+
+#### Our Preferred Design
+
+In our preferred design, the prediction market elicits predictions from agents arriving in sequence, terminates with some probability $\alpha$ after every report, and pays all but the final $k$ agents using cross-entropy market scoring rules with the terminal agent serving as the reference agent $r$ . The final $k$ agents are simply paid a flat fee $R$ . The primary incentive issue is that agent $t$ seeks to both closely match their reference prediction and also to nudge their reference agent towards more certain predictions. However, as long as agent $t$ ’s reference agent $r$ satisfies $r\geq t+k$ where $k$ is chosen as in Remark 344
+ 4
+
+ Technically, setting $k$ using Remark 3 depends on the market prior ${\bf y}^{(t-1)}$ which varies for each agent and time step. However, as seen in Figure 2, the variation is not large, and is even flat for small enough $\varepsilon$ . Thus, for any chosen $\varepsilon$ we can just choose $k=\max_{{\bf y}^{(t-1)}\in[y_{min},y_{max}]}k_{min}({\bf y}^{(t-1)})$ for some $y_{min},y_{max}$ a very small amount away from 0 and 1 respectively to avoid any pathologies with the boundaries. $k$ can also be set without reference to the prior according to Theorem 4. or Theorem 4, truthful reporting is either $\varepsilon$ -incentive-compatible or strictly incentive-compatible. With such a design, market predictions prior to $t$ are shared signals between agents $t$ and $r$ , i.e., $x^{(s)}=\tilde{x}^{(1:t-1)}$ .
+Agent $t$ ’s private information $x^{(t)}$ remains private unless truthfully revealed, and agent $r$ ’s ‘private signals’ that agent $t$ cannot access are comprised of their own signal and predictions made after agent $t$ , $\hat{x}^{(r)}=\{x^{(r)},{\bf q}^{(t+1:r)}\}$ . We discuss other possible designs in Section 6.2. In this case, the cost to the mechanism designer is $k\cdot R+\sum_{t=1}^{r-k}-H({\bf r},{\bf q}^{(t)})+H({\bf r},{\bf q}^{(t-1)})=k\cdot R-H({\bf r},{\bf q}^{(r-k)})+H({\bf r},{\bf q}^{(0)})$ .
+
+###### Theorem 6 (Truthful Reporting is a Perfect Bayesian Equilibrium).
+
+In a self-resolving prediction market where a reference agent can observe at least $k$ additional predictions (with $k$ chosen according to Theorem 4), the strategy profile of truthful reporting and belief profile of believing all previous agents reported truthfully is a strict Perfect Bayesian Equilibrium. When $k$ is chosen according to Remark 3, this strategy and belief profile is a $\varepsilon-$ PBE. Off the equilibrium path, agents believe any observed (mis)report to be truthful if that report is consistent with the reporting agent’s signal structure. If the observed prediction is invalid, (i.e., inconsistent with any signal the reporting agent could have observed), all subsequent agents may either update as if they learned some arbitrary signal or ignore this prediction, and believe all subsequent agents continue to report truthfully.
+
+Our self-resolving prediction market design also admits some less plausible PBE, like uninformative equilibria (where all agents report the same prediction regardless of true belief) and permutation equilibria (where all agents re-label their beliefs on $Y$ ). Intuitively, if every agent reports the same prediction, they do not improve on a peer’s report, and hence receive zero payout – strictly less than in the informative equilibrium. We discuss this in greater detail in Appendix C.
+
+### 6.1 Market Termination with Random Stopping
+
+Next, we expand on the mechanics of our preferred self-resolving prediction market design, which terminates with some probability $\alpha$ and sets the final agent as the fixed reference agent, paying all but the last $k$ agents with this reference agent. The last $k$ agents are simply paid some constant reward $R$ . This guarantees that we only score an agent against the final agent if they are at least $k$ steps removed. In such a design, every agent $t$ receives the constant reward $R$ with probability $\sum_{n=1}^{k}(1-\alpha)^{n-1}\alpha=1-(1-\alpha)^{k}$ , and is paid according to the cross-entropy market scoring rule with probability $(1-\alpha)^{k}$ . When $k$ is chosen according to Theorem 4, we maintain strict truthfulness. When $k$ is chosen according to Equation 3, this gives us $\left((1-\alpha)^{k}\cdot\varepsilon\right)-$ incentive-compatibility; by $\mathbb{E}[S_{CEM}({\bf q}^{(t)})|\hat{X}^{(t)}]\leq\mathbb{E}[S_{CEM}({\bf p}^{(t)})|\hat{X}^{(t)}]+\varepsilon$ , we can write any agent $t$ ’s expected utility as:
+
+ | 
+ | $\begin{split}\mathbb{E}[U({\bf q}^{(t)})]&=\left(\sum_{n=1}^{k}(1-\alpha)^{n-1}\alpha R\right)+(1-\alpha)^{k}\cdot\mathbb{E}[S_{CEM}({\bf q}^{(t)})|\hat{X}^{(t)}]\\
+&\leq\left(1-(1-\alpha)^{k}\right)R+(1-\alpha)^{k}\left(\mathbb{E}[S_{CEM}({\bf p}^{(t)})|\hat{X}^{(t)}]+\varepsilon\right)\\
+&=\mathbb{E}[U({\bf p}^{(t)})]+(1-\alpha)^{k}\varepsilon\end{split}$ 
+ | 
+ | (10)
+
+#### Choice of $\alpha$ 
+
+For risk-neutral agents, these choices do not matter in theory since any agent is no more than $\varepsilon$ better off by misreporting for any choice of $R$ or $\alpha$ . Yet, as a practical matter, we would like to choose an $\alpha$ not so large that the market typically terminates quickly and pays most agents flat rewards, and choose $\alpha$ not so small that the market does not terminate quickly enough. Thus, the mechanism designer may choose some desired expected number of traders $T$ . Then, by setting $\alpha=\frac{1}{T+k}$ , the mechanism will average $T+k$ participating agents before termination, where $T$ agents can be paid according to cross-entropy market scoring rules and $k$ traders can be paid a flat fee.
+
+#### Random Stopping without Flat Fees
+
+Lastly, we observe that it is also possible to pay every agent, including the last $k$ agents, based on the final (reference) agent’s prediction this could be done by finding the setting of $\alpha$ such that the expected gain from deviating in a supposedly truthful PBE (while allowing for the reference agent to be less than some $k$ timesteps away) is no more than $\varepsilon$ , i.e., solving $\mathbb{E}_{\alpha}[\hat{\mathcal{D}}_{\eta}(\Delta,{\bf p}^{(t-1)})]\leq\varepsilon$ for $\alpha$ . To compute this, we would first use the upper bound on $\Delta$ in Theorem 1 to arrive at an upper bound on $\hat{\mathcal{D}}_{\eta}$ for each possible $k$ , and then weight this upper bound by $(1-\alpha)^{k-1}\alpha$ to take the expectation, and solve for $\alpha$ . This computation would again need to be done numerically. The idea is that from each trader’s perspective, they expect the market to continue for long enough that in expectation, their reference agents will be sufficiently ‘distant’ so they can expect to gain no more than $\varepsilon$ by deviating from truthful reporting.
+
+### 6.2 Other Design Choices
+
+Here, we consider some alternative design decisions, such as running a parallel prediction market for reference, ideas for terminating self-resolving prediction markets, strategies for choosing the reference agent, and the cost to the mechanism designer.
+
+#### Parallel Prediction Markets
+
+Instead of choosing a reference agent from the same prediction market, we could also run one or more separate, walled-off parallel prediction market on the same question and choose agents in one market as the reference for agents in the other using cross-entropy MSRs. Importantly, we must ensure that agents in one market cannot observe the predictions in the other(s). Agent $r$ can neither observe agent $t$ ’s report nor do the two agents share any signals; rather each agent only has access to their own private signal and previous predictions in their own market. In doing so, we trade the incentive to strategically mislead reference agents for an incentive to hedge towards the common prior in light of uncertainty about the reference agent’s information and beliefs. Yet, if we numerically choose $k$ appropriately as in Theorem 2 (or Remark 3), agents cannot gain in expectation (or gain more than $\varepsilon$ ) by misreporting their posterior.
+Ultimately, there is no deep theoretical difference in incentives between our preferred design and parallel prediction markets; if the reference agent has enough informational substitutes, we will be able to guarantee that the incentive to deviate from truthful reporting vanishes. However, operating two different prediction markets is inefficient as there are two ‘prices’ each aggregating only half the information; thus, we favour the design where the reference agent is chosen to be the terminal agent in the same market.
+
+#### Strategies for Choosing Reference Agent
+
+While we choose the terminal agent as the reference agent which requires agents to wait for market termination, there are several other options given a required $k$ : (1) use a rolling window of size $k$ , so agents receive can receive their payouts relatively quickly without having to wait for the market to terminate (however, this has other downsides, as discussed next); (2) select a reference agent per batch, i.e., split agents into batches that share the same reference agent, which has the benefit of quick payoffs for agents and infrequent payoff determinations for the mechanism designer. Additionally, the mechanism can (and probably should) average the predictions of some number of reference agents to decrease the variance in payoffs, especially in the presence of uninformed agents or ‘noise traders.’
+
+#### Market Termination Options
+
+Self-resolving prediction markets can be run indefinitely if reference agents are chosen periodically to payoff previous agents. Alternatively, if the mechanism designer has access to $k$ trusted agents, these can be placed as the final $k$ agents in the market before termination. Incentive-compatibility then follows from backward induction. In general, the most plausible approach is our preferred design of simply terminating the market with some small probability $\alpha=\frac{1}{T+k}$ (where $T$ is the desired average number of traders to elicit predictions from) and paying a flat fee to the last $k$ agents who do not have a reference agent as discussed above.
+
+#### Cost to the Mechanism Designer
+
+The cost to the mechanism designer is simply the sum of the payouts to each agent and the constant payouts to agents without reference agents.
+With a rolling window of size $k$ or batched agents, the worst case cost to mechanism designer is unbounded, since agents are being scored against changing reference predictions. However, using fixed reference agents (such as the final agent in the market) can ensure bounded loss, which motivates our preferred design.
+
+### 6.3 Trading Securities with a Cost Function-Based Automated Market Maker
+
+Here, we show that self-resolving prediction markets with fixed reference agents and cross-entropy market scoring rules can easily be implemented as a cost function-based market maker, allowing agents to trade securities that payout upon expiration – a more familiar design of prediction markets. By virtue of being built on the log-scoring rule, the automated market maker (AMM) for cross-entropy market scoring rule is nearly identical to the AMM for the log market scoring rule (Chen and Pennock, 2012). The only difference is that in standard prediction markets, contracts corresponding to the event that happened pay out $\$1$ , while contracts corresponding to any event that did not happen expire worthless. In our self-resolving prediction markets, contracts pay out at the probability set by the reference agent, i.e., contracts on $Y=0$ pay out $r_{0}$ cents, and contracts on $Y=1$ pay out $r_{1}$ cents.
+
+#### Cost function-based Market Maker
+
+Consider an automated market maker with a quantity vector of contracts sold so far ${\bf c}=\begin{pmatrix}c_{0}&c_{1}\end{pmatrix}$ where $c_{i}$ corresponds to the number of contracts sold corresponding to outcome $Y_{i}$ . Let the AMM have a cost-function $C$ that maps the quantity vector to the total cash raised through the sale (and purchase) of securities as $C({\bf c})$ . When agent $t$ wants to buy or sell contracts, the going price $q_{i}$ for security $i$ is the instantaneous change in ‘cash raised’ or the cost function, i.e., $q_{i}({\bf c})=\nicefrac{{\partial C}}{{\partial c_{i}}}$ . In buying or selling contracts, agent $t$ changes the quantity vector from ${\bf c}^{(t-1)}$ to ${\bf c}^{(t)}$ , and pays in (or receives, if negative) $C({\bf c}^{(t)})-C({\bf c}^{(t-1)})=\int_{{\bf c}^{(t-1)}}^{{\bf c}^{(t)}}w({\bf c})\,d{\bf c}$ . When the market terminates with reference prediction ${\bf r}$ , $c_{0}$ contracts expire at $r_{0}$ cents and $c_{1}$ contracts expire at $r_{1}$ cents, so the AMM must pay out $c_{0}r_{0}+c_{1}r_{1}$ , having raised $C({\bf c})$ .
+
+#### Equivalence to Cross-Entropy Market Scoring Rules
+
+To establish an equivalence between our cross-entropy market scoring rules and a cost function-based automated market maker, we require that $S_{\text{CEM}}({\bf r},{\bf q}^{(t)},{\bf q}^{(t-1)})=S_{\text{CE}}({\bf r},{\bf q}^{(t)})-S_{\text{CE}}({\bf r},{\bf q}^{(t-1)})=({\bf c}^{(t)}-{\bf c}^{(t-1)})\cdot{\bf r}-\left(C({\bf c}^{(t)})-C({\bf c}^{(t-1)}\right)$ . Thus, we arrive at a similar system of three equations as Chen and Pennock, 2012: (1) $S_{\text{CE}}({\bf r},{\bf q})={\bf c}\cdot{\bf r}-C({\bf c})$ , (2) $\sum_{i}q_{i}=1$ (i.e., prices across outcomes sum to 1 to prevent arbitrage), and (3) $q_{i}=\nicefrac{{\partial C}}{{\partial c_{i}}}$ . The second and third equations are exactly the same as the system of equations given by (Chen and Pennock, 2012), while the first is a slight modification that ensures the payout depends on the reference prediction.
+
+Observe that we can use the same cost-function as the log scoring rule, $C({\bf c})=b\cdot\log\left(\sum_{j}e^{\nicefrac{{c_{j}}}{{b}}}\right)$ with price function $q_{i}=\frac{e^{\nicefrac{{c_{i}}}{{b}}}}{\sum_{j}e^{\nicefrac{{c_{j}}}{{b}}}}$ satisfying conditions (2) and (3) ( $b$ is a liquidity parameter). Then, equation (1) is also satisfied:
+
+ | 
+ | $\small\begin{split}S_{\text{CE}}({\bf r},{\bf q}^{(t)})&=b\left(r_{1}\log(q_{1})+r_{0}\log(q_{0})\right)\\
+&=b\left(r_{1}\log\left(\frac{e^{\nicefrac{{c_{1}}}{{b}}}}{e^{\nicefrac{{c_{0}}}{{b}}}+e^{\nicefrac{{c_{1}}}{{b}}}}\right)+r_{0}\log\left(\frac{e^{\nicefrac{{c_{0}}}{{b}}}}{e^{\nicefrac{{c_{0}}}{{b}}}+e^{\nicefrac{{c_{1}}}{{b}}}}\right)\right)\\
+&=b\left(r_{1}\log\left({e^{\nicefrac{{c_{1}}}{{b}}}}\right)-r_{1}\log\left({e^{\nicefrac{{c_{0}}}{{b}}}+e^{\nicefrac{{c_{1}}}{{b}}}}\right)+r_{0}\log\left({e^{\nicefrac{{c_{0}}}{{b}}}}\right)-r_{0}\log\left({e^{\nicefrac{{c_{0}}}{{b}}}+e^{\nicefrac{{c_{1}}}{{b}}}}\right)\right)\\
+&=b\left(r_{1}{\frac{c_{1}}{b}}+r_{0}{\frac{c_{0}}{b}}-(r_{1}+r_{0})\log\left({e^{\nicefrac{{c_{0}}}{{b}}}+e^{\nicefrac{{c_{1}}}{{b}}}}\right)\right)\\
+&=c_{1}r_{1}+c_{0}r_{0}-b\cdot\log\left(e^{\nicefrac{{c_{0}}}{{b}}}+e^{\nicefrac{{c_{1}}}{{b}}}\right)\\
+&={\bf c}\cdot{\bf r}-C({\bf c})\end{split}$ 
+ | 
+ | (11)
+
+Thus, our self-resolving prediction market using a fixed reference agent where agents report probabilistic predictions and are paid based on cross-entropy market scoring rules can equivalently be implemented as agents trading contracts through a cost function-based market maker where contracts payout at prices determined by the reference agent’s trade.
+
+## 7 Conclusion
+
+We introduced the first incentive-compatible design for self-resolving prediction markets that can efficiently elicit and aggregate information in the absence of ground truth. Our mechanism sequentially elicits predictions from agents, randomly terminates with probability $\alpha$ , and pays all but the final $k$ agents based on the cross-entropy between their prediction and the terminal agent, with the final $k$ agents receiving a flat fee. We showed that truthful reporting is a strict perfect Bayesian equilibrium, and that the payout in uninformative equilibria is zero. Our key insight was that while a simple ‘peer prediction’ scheme of paying agents based on agreement with a peer is not truthful, it becomes truthful when the reference agent has access to enough private conditionally independent signals (i.e., informational substitutes).
+
+Our analysis of self-resolving prediction markets (or equivalently, sequential peer prediction) opens up rich directions for future work. One important direction is to consider situations where our informational substitutes assumption does not hold, e.g., when agents have a cost to exerting effort or acquiring information. It may be that agent signals are not conditionally dependent given the outcome $Y$ , and are perhaps only conditionally independent given the outcome, agent effort, and agent expertise. Thus, studying how agents can signal their effort or expertise in a simple way is an important direction for future work. It would also be interesting to explore incentives in the presence of risk aversion. Lastly and most importantly, empirically tests of our proposed mechanism would shed further light on the viability of our mechanism in aggregating agents’ beliefs on both resolvable and unresolvable questions ranging from causal effects, to long-term forecasts about economic indicators, to data-collection tasks widely used in machine learning.
+
+## References
+
+- Aaronson, (2005)
+
+Aaronson, S. (2005).
+
+The complexity of agreement.
+
+In Proceedings of the thirty-seventh annual ACM symposium on
+Theory of computing, pages 634–643.
+
+- Agarwal et al., (2020)
+
+Agarwal, A., Mandal, D., Parkes, D. C., and Shah, N. (2020).
+
+Peer prediction with heterogeneous users.
+
+ACM Transactions on Economics and Computation (TEAC), 8:1 –
+34.
+
+- Aumann, (1976)
+
+Aumann, R. J. (1976).
+
+Agreeing to disagree.
+
+The annals of statistics, 4(6):1236–1239.
+
+- Berg et al., (2008)
+
+Berg, J., Forsythe, R., Nelson, F., and Rietz, T. (2008).
+
+Results from a dozen years of election futures markets research.
+
+Handbook of experimental economics results, 1:742–751.
+
+- Brier et al., (1950)
+
+Brier, G. W. et al. (1950).
+
+Verification of forecasts expressed in terms of probability.
+
+Monthly weather review, 78(1):1–3.
+
+- Chen et al., (2010)
+
+Chen, Y., Dimitrov, S., Sami, R., Reeves, D. M., Pennock, D. M., Hanson, R. D.,
+Fortnow, L., and Gonen, R. (2010).
+
+Gaming prediction markets: Equilibrium strategies with a market
+maker.
+
+Algorithmica, 58:930–969.
+
+- Chen et al., (2011)
+
+Chen, Y., Kash, I., Ruberry, M., and Shnayder, V. (2011).
+
+Decision markets with good incentives.
+
+In Internet and Network Economics: 7th International Workshop,
+WINE 2011, Singapore, December 11-14, 2011. Proceedings 7, pages 72–83.
+Springer.
+
+- Chen and Kash, (2011)
+
+Chen, Y. and Kash, I. A. (2011).
+
+Information elicitation for decision making.
+
+In AAMAS, pages 175–182.
+
+- Chen et al., (2014)
+
+Chen, Y., Kash, I. A., Ruberry, M., and Shnayder, V. (2014).
+
+Eliciting predictions and recommendations for decision making.
+
+ACM Transactions on Economics and Computation (TEAC),
+2(2):1–27.
+
+- Chen and Pennock, (2012)
+
+Chen, Y. and Pennock, D. M. (2012).
+
+A utility framework for bounded-loss market makers.
+
+arXiv preprint arXiv:1206.5252.
+
+- Chen and Waggoner, (2016)
+
+Chen, Y. and Waggoner, B. (2016).
+
+Informational substitutes.
+
+In 2016 IEEE 57th Annual Symposium on Foundations of Computer
+Science (FOCS), pages 239–247. IEEE.
+
+- Debmalya et al., (2020)
+
+Debmalya, M., Goran, R., and David, P. (2020).
+
+The effectiveness of peer prediction in long-term forecasting.
+
+In Proceedings of the AAAI Conference on Artificial
+Intelligence, volume 34, pages 2160–2167.
+
+- Dreber et al., (2015)
+
+Dreber, A., Pfeiffer, T., Almenberg, J., Isaksson, S., Wilson, B., Chen, Y.,
+Nosek, B. A., and Johannesson, M. (2015).
+
+Using prediction markets to estimate the reproducibility of
+scientific research.
+
+Proceedings of the National Academy of Sciences,
+112(50):15343–15347.
+
+- Feng et al., (2022)
+
+Feng, S., Yu, F.-Y., and Chen, Y. (2022).
+
+Peer prediction for learning agents.
+
+arXiv preprint arXiv:2208.04433.
+
+- Freeman et al., (2017)
+
+Freeman, R., Lahaie, S., and Pennock, D. (2017).
+
+Crowdsourced outcome determination in prediction markets.
+
+In Proceedings of the AAAI Conference on Artificial
+Intelligence, volume 31.
+
+- Frongillo et al., (2015)
+
+Frongillo, R., Chen, Y., and Kash, I. (2015).
+
+Elicitation for aggregation.
+
+In Proceedings of the AAAI Conference on Artificial
+Intelligence, volume 29.
+
+- Frongillo et al., (2021)
+
+Frongillo, R. M., Neyman, E., and Waggoner, B. (2021).
+
+Agreement implies accuracy for substitutable signals.
+
+ArXiv, abs/2111.03278.
+
+- Gao et al., (2016)
+
+Gao, A., Wright, J. R., and Leyton-Brown, K. (2016).
+
+Incentivizing evaluation via limited access to ground truth:
+Peer-prediction makes things worse.
+
+arXiv preprint arXiv:1606.07042.
+
+- Gao et al., (2014)
+
+Gao, X. A., Mao, A., Chen, Y., and Adams, R. P. (2014).
+
+Trick or treat: putting peer prediction to the test.
+
+In Proceedings of the fifteenth ACM conference on Economics and
+computation, pages 507–524.
+
+- Gao et al., (2013)
+
+Gao, X. A., Zhang, J., and Chen, Y. (2013).
+
+What you jointly know determines how you act: Strategic interactions
+in prediction markets.
+
+In Proceedings of the fourteenth ACM conference on Electronic
+commerce, pages 489–506.
+
+- Geanakoplos and Polemarchakis, (1982)
+
+Geanakoplos, J. D. and Polemarchakis, H. M. (1982).
+
+We can’t disagree forever.
+
+Journal of Economic theory, 28(1):192–200.
+
+- Golub and Sadler, (2017)
+
+Golub, B. and Sadler, E. (2017).
+
+Learning in social networks.
+
+Available at SSRN 2919146.
+
+- Good, (1952)
+
+Good, I. J. (1952).
+
+Rational decisions.
+
+Journal of the Royal Statistical Society: Series B
+(Methodological), 14(1):107–114.
+
+- Han et al., (2021)
+
+Han, Q., Ruan, S., Kong, Y., Liu, A., Mohsin, F., and Xia, L. (2021).
+
+Truthful information elicitation from hybrid crowds.
+
+ArXiv, abs/2107.10119.
+
+- Hanson, (2003)
+
+Hanson, R. (2003).
+
+Combinatorial information market design.
+
+Information Systems Frontiers, 5:107–119.
+
+- Hanson, (1999)
+
+Hanson, R. D. (1999).
+
+Decision markets.
+
+- Karger et al., (2021)
+
+Karger, E., Monrad, J., Mellers, B., and Tetlock, P. (2021).
+
+Reciprocal scoring: A method for forecasting unanswerable questions.
+
+Available at SSRN 3954498.
+
+- Kong and Schoenebeck, (2019)
+
+Kong, Y. and Schoenebeck, G. (2019).
+
+An information theoretic framework for designing information
+elicitation mechanisms that reward truth-telling.
+
+ACM Transactions on Economics and Computation (TEAC),
+7(1):1–33.
+
+- Kong and Schoenebeck, (2022)
+
+Kong, Y. and Schoenebeck, G. (2022).
+
+False consensus, information theory, and prediction markets.
+
+arXiv preprint arXiv:2206.02993.
+
+- Kong et al., (2020)
+
+Kong, Y., Schoenebeck, G., Tao, B., and Yu, F.-Y. (2020).
+
+Information elicitation mechanisms for statistical estimation.
+
+In Proceedings of the AAAI Conference on Artificial
+Intelligence, volume 34, pages 2095–2102.
+
+- Liu and Chen, (2017)
+
+Liu, Y. and Chen, Y. (2017).
+
+Sequential peer prediction: Learning to elicit effort using posted
+prices.
+
+In Proceedings of the AAAI Conference on Artificial
+Intelligence, volume 31.
+
+- Liu et al., (2020)
+
+Liu, Y., Wang, J., and Chen, Y. (2020).
+
+Surrogate scoring rules.
+
+In Proceedings of the 21st ACM Conference on Economics and
+Computation, pages 853–871.
+
+- McLean and Postlewaite, (2002)
+
+McLean, R. and Postlewaite, A. (2002).
+
+Informational size and incentive compatibility.
+
+Econometrica, 70(6):2421–2453.
+
+- Milgrom and Stokey, (1982)
+
+Milgrom, P. and Stokey, N. (1982).
+
+Information, trade and common knowledge.
+
+Journal of economic theory, 26(1):17–27.
+
+- Miller et al., (2005)
+
+Miller, N., Resnick, P., and Zeckhauser, R. (2005).
+
+Eliciting informative feedback: The peer-prediction method.
+
+Management Science, 51(9):1359–1373.
+
+- Ostrovsky, (2009)
+
+Ostrovsky, M. (2009).
+
+Information aggregation in dynamic markets with strategic traders.
+
+In Proceedings of the 10th ACM conference on Electronic
+commerce, pages 253–254.
+
+- Othman and Sandholm, (2010)
+
+Othman, A. and Sandholm, T. (2010).
+
+Decision rules and decision markets.
+
+In AAMAS, pages 625–632.
+
+- Pennock and Sami, (2007)
+
+Pennock, D. M. and Sami, R. (2007).
+
+Computational aspects of prediction markets.
+
+Algorithmic game theory, pages 651–674.
+
+- Polgreen et al., (2007)
+
+Polgreen, P. M., Nelson, F. D., Neumann, G. R., and Weinstein, R. A. (2007).
+
+Use of prediction markets to forecast infectious disease activity.
+
+Clinical Infectious Diseases, 44(2):272–279.
+
+- Prelec, (2004)
+
+Prelec, D. (2004).
+
+A bayesian truth serum for subjective data.
+
+science, 306(5695):462–466.
+
+- Radanovic and Faltings, (2013)
+
+Radanovic, G. and Faltings, B. (2013).
+
+A robust bayesian truth serum for non-binary signals.
+
+In Proceedings of the AAAI Conference on Artificial
+Intelligence, volume 27, pages 833–839.
+
+- Radanovic and Faltings, (2015)
+
+Radanovic, G. and Faltings, B. (2015).
+
+Incentives for subjective evaluations with private beliefs.
+
+In Twenty-Ninth AAAI Conference on Artificial Intelligence.
+
+- Radanovic et al., (2016)
+
+Radanovic, G., Faltings, B., and Jurca, R. (2016).
+
+Incentives for effort in crowdsourcing using the peer truth serum.
+
+ACM Transactions on Intelligent Systems and Technology (TIST),
+7(4):1–28.
+
+- Schoenebeck and Yu, (2020)
+
+Schoenebeck, G. and Yu, F.-Y. (2020).
+
+Two strongly truthful mechanisms for three heterogeneous agents
+answering one question.
+
+In International Conference on Web and Internet Economics,
+pages 119–132. Springer.
+
+- Schoenebeck et al., (2021)
+
+Schoenebeck, G., Yu, F.-Y., and Zhang, Y. (2021).
+
+Information elicitation from rowdy crowds.
+
+In Proceedings of the Web Conference 2021, pages 3974–3986.
+
+- Shnayder et al., (2016)
+
+Shnayder, V., Agarwal, A., Frongillo, R., and Parkes, D. C. (2016).
+
+Informed truthfulness in multi-task peer prediction.
+
+In Proceedings of the 2016 ACM Conference on Economics and
+Computation, pages 179–196.
+
+- Srinivasan and Morgenstern, (2021)
+
+Srinivasan, S. and Morgenstern, J. (2021).
+
+Auctions and peer prediction for academic peer review.
+
+arXiv preprint arXiv:2109.00923.
+
+- Taleb et al., (2023)
+
+Taleb, N. N., Richman, R., Carreira, M., and Sharpe, J. (2023).
+
+The probability conflation: A reply.
+
+arXiv preprint arXiv:2301.10985.
+
+- Von Ahn and Dabbish, (2004)
+
+Von Ahn, L. and Dabbish, L. (2004).
+
+Labeling images with a computer game.
+
+In Proceedings of the SIGCHI conference on Human factors in
+computing systems, pages 319–326.
+
+- Waggoner and Chen, (2014)
+
+Waggoner, B. and Chen, Y. (2014).
+
+Output agreement mechanisms and common knowledge.
+
+In Proceedings of the AAAI Conference on Human Computation and
+Crowdsourcing, volume 2, pages 220–226.
+
+- Witkowski et al., (2013)
+
+Witkowski, J., Bachrach, Y., Key, P., and Parkes, D. (2013).
+
+Dwelling on the negative: Incentivizing effort in peer prediction.
+
+In Proceedings of the AAAI Conference on Human Computation and
+Crowdsourcing, volume 1, pages 190–197.
+
+- (52)
+
+Witkowski, J. and Parkes, D. (2012a).
+
+A robust bayesian truth serum for small populations.
+
+In Proceedings of the AAAI Conference on Artificial
+Intelligence, volume 26, pages 1492–1498.
+
+- (53)
+
+Witkowski, J. and Parkes, D. C. (2012b).
+
+Peer prediction without a common prior.
+
+In Proceedings of the 13th ACM Conference on Electronic
+Commerce, pages 964–981.
+
+- Witkowski and Parkes, (2013)
+
+Witkowski, J. and Parkes, D. C. (2013).
+
+Learning the prior in minimal peer prediction.
+
+In Proceedings of the 3rd Workshop on Social Computing and User
+Generated Content at the ACM Conference on Electronic Commerce, volume 14.
+
+## Appendix A Example of Incentive to Strategically Mislead under Cross-Entropy Scoring Rules
+
+As a concrete example, consider the following information structure. Suppose the market’s initial probability for $Y=1$ is 0.5, and say agent 1 has a partially informative private signal, in that if they receive private signal $X^{(1)}=0$ , their posterior over $Y=1$ is 0.49, and if they receive private signal $X^{(1)}=1$ their posterior over $Y=1$ is 0.99. Further suppose that the subsequent agent 2 only has a very weakly informative private signal, such that if they see $X^{(2)}=0$ , they multiply the market odds by 0.99, and if they see $X^{(2)}=1$ , they multiply the market odds by $1.01$ . Now, let’s say agent 1 receives $X^{(1)}=0$ and updates to a posterior of 0.49. If agent 1 reports their true posterior of 0.49 to the mechanism, agent 2’s posterior is either 0.487 or 0.492 depending on whether their private signal is $X^{(2)}=0$ or $X^{(2)}=1$ respectively. This nets agent 1 a payoff of approximately $-0.693$ either way. Alternatively, if agent 1 misreports their posterior to be 0.99 as if they had received the signal $X=1$ , agent 2 believing this to be truthful will report a posterior of about 0.99 as well, netting agent 1 a significantly higher reward of approximately $-0.055$ . Clearly, at any supposed truthful equilibrium, agent 1 could have an incentive to deviate from truthful reporting.
+
+## Appendix B Visualizing Incentives
+
+Here, we visualize incentives to deviate based on the number of signals the reference agent has. This analysis does not consider the $\tau-$ granularity of agents’ signal spaces.
+
+### B.1 Visualizing Incentives under Cross-Entropy Scoring Rules
+
+We made three observations in Section 5.2 regarding the upper bound on the gain in deviating from truthful reporting $\mathcal{D}_{\eta}(\Delta,{\bf y)})$ from Equation 6 in Theorem 6, which we enumerate and visualize here:
+
+- 1. 
+
+Upper bound on gain from deviating from truthful reporting $\mathcal{D}_{\eta}(\Delta,{\bf y})$ vanishes with the adjustment term $\Delta$ : As the adjustment term $\Delta\to 0$ , the upper bound on the incentive to deviate from truthful reporting also goes to zero, i.e., $\mathcal{D}_{\eta}(\Delta,{\bf y})\to 0$ . We plot this upper bound $\mathcal{D}_{\eta}(\Delta,{\bf y})$ as a function of the adjustment term $\Delta$ for various choices of ${\bf y}$ and $\eta$ in Figure 3.
+
+One interesting observation is that the curve appears ‘cut off’ for various values of $\Delta$ . The reason for this is that $\Delta$ , as defined in Lemma 1, is an adjustment to a valid posterior ${\bf p}^{(t)}$ that must remain a valid probability distribution. This requirement essentially translates to a requirement that the denominator in Equation 6 be greater than zero (see proof of Theorem 1), i.e., $\eta y_{0}-\Delta\cdot\left(\eta y_{0}+({1-\eta}){y_{1}}\right)$ . Equivalently, we have $\Delta0\Rightarrow\Delta>-\frac{({1-\eta})y_{1}}{\left(\eta y_{0}+({1-\eta}){y_{1}}\right)}$ . Thus, when we defined ${\varepsilon^{\prime}}=\min\{|\Delta|:\mathcal{D}_{\eta}(\Delta,{\bf y})=\varepsilon\}$ , we can observe that $\varepsilon^{\prime}$ will be the positive-valued solution when $y_{1}>\eta$ and the negative-valued solution when $y_{1}2. 
+
+ $\varepsilon^{\prime}$ , the maximum allowed magnitude of the adjustment term $\Delta$ to ensure that the gain in deviating from truthful reporting is no more than $\varepsilon$ , falls gracefully with $\varepsilon$ : In Figure 4, we investigate what any desired upper bound on the incentive to deviate ( $\varepsilon$ ) implies for the maximum allowed adjustment to the agent’s true posterior, where $\varepsilon^{\prime}=\min\{|\Delta|:\mathcal{D}_{\eta}(\Delta,{\bf y})=\varepsilon\}$ . Indeed, we find that an order of magnitude decrease in $\varepsilon$ corresponds roughly to an order of magnitude decrease in $\varepsilon^{\prime}$ . Additionally, $\varepsilon^{\prime}$ dependence on the prior $y_{1}$ is relatively well-behaved across a broad range of $y_{1}$ ; however, note that at the edges (not visualized) where $y_{1}$ is very close to 1 or 0, the curve can turn quite steeply. Yet, if the prior is already so concentrated, in practical terms there is not much need to elicit forecasts.
+
+- 3. 
+
+ $k_{min}$ , the minimum number of private informational substitutes that the reference agent must have that agent $t$ does not have, scales gracefully with $\varepsilon$ : In Figure 5, we plot the minimum number of informational substitutes that the reference agent must have (that agent $t$ does not) in order to guarantee that agent $t$ ’s maximum gain from deviating is no more than $\varepsilon$ . We arrive at this for any desired $\varepsilon$ by first computing the upper bound $\varepsilon^{\prime}$ on the adjustment term $\Delta$ as described above, and then using this to compute $k$ through Equation 3 of Theorem 1. We find that the $k$ is significantly more sensitive to the setting of $\delta$ than the setting of $\eta$ or the choice of $\varepsilon$ .
+
+Figure 3: (Cross-Entropy Scoring Rules) Plot of the upper bound of gain in deviating from truthfulness as a function of the adjustment term $\Delta$ . Observe that as the adjustment term $\Delta\to 0$ , the upper bound $\mathcal{D}_{\eta}(\Delta,{\bf y})\to 0$ as well, showing that the incentive to deviate can be made to disappear by sending the adjustment term to zero.
+
+Figure 4: (Cross-Entropy Scoring Rules) Plot of maximum allowed adjustment $\varepsilon^{\prime}$ to guarantee that the incentive to deviate from truthful reporting is no more than $\varepsilon$ as a function of the prior on $Y=1$ as $y_{1}$ , for various choices of $\varepsilon$ .
+
+Figure 5: (Cross-Entropy Scoring Rules) Plot of minimum number of information substitutes that the reference agent needs to guarantee that the incentive to deviate from truthful reporting is no more than $\varepsilon$ as a function of the prior $y_{1}$ under cross-entropy scoring rules, for different choices of $(\delta,\eta)$ . 
+
+### B.2 Visualizing Incentives under Cross-Entropy Market Scoring Rules
+
+Here, we carry out a similar visualization as above, but for cross-entropy market scoring rules, where the upper bound on the incentive to deviate $\hat{\mathcal{D}}_{\eta}({\Delta},{\bf y}^{(t-1)})$ is given by Equation 9 in Theorem 9.
+
+- 1. 
+
+Upper bound on gain from deviating from truthful reporting $\hat{\mathcal{D}}_{\eta}(\Delta,{\bf y}^{(t-1)})$ vanishes with the adjustment term $\Delta$ : As the adjustment term $\Delta\to 0$ , the upper bound on the incentive to deviate from truthful reporting also goes to zero, i.e., $\hat{\mathcal{D}}_{\eta}(\Delta,{\bf y}^{(t-1)})\to 0$ . We plot this upper bound $\hat{\mathcal{D}}_{\eta}(\Delta,{\bf y}^{(t-1)})$ as a function of the adjustment term $\Delta$ for various choices of ${\bf y}$ and $\eta$ in Figure 6. Once again, the curve appears ‘cut off’ for various values of $\Delta$ . As before, this stems from the fact that $\Delta$ , as defined in Lemma 1, is an adjustment to a valid posterior ${\bf p}^{(t)}$ that must remain a valid probability distribution. This requirement thus translates to a requirement that the numerator and denominator in Equation 9 be greater than zero (see proof of Theorem 9), i.e., $\eta-\Delta\cdot\left(\eta+({1-\eta})\frac{y_{1}^{(t-1)}}{y_{0}^{(t-1)}}\right)>0\Rightarrow\Delta0\Rightarrow\Delta>-\frac{{1-\eta}}{\eta\frac{y_{0}^{(t-1)}}{y_{1}^{(t-1)}}+({1-\eta})}$ . The curves in Figure 6 get cut off as $\Delta$ approaches these bounds.
+
+- 2. 
+
+ $\varepsilon^{\prime}$ , the maximum allowed magnitude of the adjustment term $\Delta$ to ensure that the gain in deviating from truthful reporting is no more than $\varepsilon$ , falls gracefully with $\varepsilon$ : In Figure 7, we investigate what any desired upper bound on the incentive to deviate ( $\varepsilon$ ) implies for the maximum allowed adjustment to the agent’s true posterior, where $\varepsilon^{\prime}=\min\{|\Delta|:\hat{\mathcal{D}}_{\eta}(\Delta,{\bf y}^{(t-1)})=\varepsilon\}$ . Indeed, we find that an order of magnitude decrease in $\varepsilon$ corresponds roughly to an order of magnitude decrease in $\varepsilon^{\prime}$ . Additionally, $\varepsilon^{\prime}$ dependence on the prior $y_{1}^{(t-1)}$ is relatively well-behaved across a broad range of $y_{1}^{(t-1)}$ . Note that the $y$ -axis in Figure 6 is on a log scale, so the variation in $y_{1}^{(t-1)}$ within the same order of magnitude is masked by the plot. Additionally, when the prior $y_{1}^{(t-1)}$ is very close 1 or 0, the curve can turn steeply; but if the prior is so strong, there is not much practical need to elicit forecasts.
+
+- 3. 
+
+ $k_{min}$ , the minimum number of private informational substitutes that the reference agent must have that agent $t$ does not have, scales gracefully with $\varepsilon$ : In Figure 8, we plot the minimum number of informational substitutes that the reference agent must have (that agent $t$ does not) in order to guarantee that agent $t$ ’s maximum gain from deviating is no more than $\varepsilon$ . We arrive at this for any desired $\varepsilon$ by first computing the upper bound $\varepsilon^{\prime}$ on the adjustment term $\Delta$ as described above, and then using this to compute $k$ through Equation 3 of Theorem 1. We find that the setting of $\delta$ matters much more than $\eta$ or $\varepsilon$ .
+
+Figure 6: (Cross-Entropy Market Scoring Rules) Plot of the upper bound of gain in deviating from truthfulness as a function of the adjustment term $\Delta$ . Observe that as the adjustment term $\Delta\to 0$ , the upper bound $\hat{\mathcal{D}}_{\eta}(\Delta,{\bf y}^{(t-1)})\to 0$ as well, showing that the incentive to deviate can be made to disappear by sending the adjustment term to zero.
+
+Figure 7: (Cross-Entropy Market Scoring Rules) Plot of maximum allowed adjustment $\varepsilon^{\prime}$ to guarantee that the incentive to deviate from truthful reporting is no more than $\varepsilon$ as a function of the market prior on $Y=1$ as $y_{1}^{(t-1)}$ , for various choices of $\varepsilon$ . 
+
+Figure 8: (Cross-Entropy Market Scoring Rules) Plot of minimum number of information substitutes that the reference agent needs to guarantee that the incentive to deviate from truthful reporting is no more than $\varepsilon$ as a function of the prior $y_{1}^{(t-1)}$ under cross-entropy MSR, for different choices of $(\delta,\eta)$ .
+
+## Appendix C Other Equilibria
+
+### C.1 Uninformative Equilibria
+
+In the absence of ground truth, it is a fundamental challenge to ensure that an information elicitation mechanism can even elicit information at all. So-called uninformative equilibria – where all agents report the same uninformative report regardless of their private signal – has remained a challenge when designing information elicitation mechanisms without ground truth.
+
+In our case, while we are not able to get rid of uninformative equilibria, we can essentially eliminate their appeal through the use of market scoring rules; this ensures agents’ payouts are all zero, and thus less than the truthful equilibrium. The only other peer prediction mechanism to make this guarantee in the single-task setting (i.e., without relying on correlations across multiple IID tasks) is the Differential Peer Prediction (DPP) mechanism by (Schoenebeck and Yu, 2020). Although their mechanism consists of two sequential stages, it does not efficiently aggregate information from all agents as we are able to do with a prediction market design. On the other hand, their result is not restricted to the case of informational substitutes.
+
+###### Theorem 7.
+
+In any self-resolving prediction market, the strategy profile where all agents report the same signal and any belief profile where agents believe subsequent agents will report the same uninformative signal (both on and off the equilibrium path) is a perfect Bayesian equilibrium. Additionally, the uninformative equilibrium pays zero reward to all agents (except the first) paid by the cross-entropy market scoring rule.
+
+###### Proof.
+
+For any agent $t$ , suppose all previous agents $j
+
+Under cross-entropy market scoring rules with respect to reference agent $t+k$ , every agent $t$ ’s payoff in the uninformative equilibrium is zero:
+
+ | 
+ | $\small\begin{split}\mathbb{E}[S_{CEM}({\bf q}^{(t)})|\hat{X}^{(t)}]&=-H\left({\bf q}^{(t+k)},{\bf q}^{(t)}\right)+H\left({\bf q}^{(t+k)},{\bf q}^{(t-1)}\right)\\
+&=-H\left({\bf q}^{(t+k)},{\bf q}^{(t+k)}\right)+H\left({\bf q}^{(t+k)},{\bf q}^{(t+k)}\right)\\
+&=0\end{split}$ 
+ | 
+ | (12)
+
+The first agent receives a reward of $-H\left({\bf q}^{(1+k)},{\bf q}^{(1+k)}\right)+H\left({\bf q}^{(1+k)},{\bf q}^{(0)}\right)=-H\left({\bf q}^{(1+k)}\right)+H\left({\bf q}^{(1+k)},{\bf q}^{(0)}\right)=\text{KL}({\bf q}^{(1+k)}||{\bf q}^{(0)})$ .
+∎
+
+### C.2 Switching Equilibria
+
+Here, we consider the most adversarial possible equilibrium, which we call ’switching equilibria.’ The idea is that in a self-resolving prediction market with a rolling window, agents can alternate between extreme reports of $p_{1}^{(t)}=0$ and $p_{1}^{(t-1)}=1$ to maximally modify the previous report while maximally agreeing with the reference agent’s report. Doing so maximizes payoff under cross-entropy market scoring rules. We state this formally below:
+
+###### Theorem 8.
+
+In self-resolving prediction markets where reference agents are chosen with a ‘rolling window’ of an even number of timesteps, the strategy profile where every alternate agent reports 1 minus the previous agent’s prediction is a perfect Bayesian equilibrium. Additionally, every agent receives an infinite payoff in this equilibrium.
+
+###### Proof.
+
+For any agent $t$ , suppose the previous agent reported $p_{1}^{(t-1)}=0$ and the reference agent $r$ is an even number of timesteps away. Further suppose that the reference agent $r$ will report $p_{1}^{(t+k)}=1$ regardless of any previous reports. Then, agent $t$ ’s payoff under cross-entropy market scoring rules is maximized when reporting ${\bf q}^{(t)}={\bf q}^{(t+k)}=\text{permute}({\bf q}^{(t-1)})$ , and agent $t$ has no incentive to deviate from this strategy. Since this holds for every agent $t$ , regardless of agents’ beliefs or past agents’ reports, the switching profile is a perfect Bayesian equilibrium.
+
+ | 
+ | $\small\begin{split}\mathbb{E}[S_{CEM}({\bf q}^{(t)})|\hat{X}^{(t)}]&=-H\left({\bf q}^{(t+k)},{\bf q}^{(t)}\right)+H\left({\bf q}^{(t+k)},{\bf q}^{(t-1)}\right)\\
+&=1\,\log(1)+0\,\log(0)-1\,\log(0)-0\,\log(1)\\
+&=0+\infty\\
+&=\infty\end{split}$ 
+ | 
+ | (13)
+
+∎
+
+An additional challenge highlighted by this result is that the loss to the automated market maker is unbounded since each agent may have a different reference agent in general. In order to get rid of this equilibrium, the mechanism could use a ‘fixed reference agent’, withhold the choice of $k$ from the agents, randomize the reference agent, etc.
+
+### C.3 Permutation Equilibria
+
+Lastly, we consider permutation equilibria, a mainstay of mechanisms for eliciting information without ground truth. The idea is that all agents could collectively re-label $Y=0$ as $Y=1$ and vice-versa, and the mechanism would function identically. This equilibrium is not a practical concern, since coordinating into such a permutation equilibrium is exceedingly unlikely, but we mention it for completeness.
+
+###### Theorem 9.
+
+In self-resolving prediction markets, the strategy profile where every agent permutes their true belief to report $q_{1}^{(1)}=p_{0}^{(t)}$ and $q_{0}^{(1)}=p_{1}^{(t)}$ , and the belief profile where every agent believes every other agent has/will similarly permute their beliefs is an $\varepsilon-$ perfect Bayesian equilibrium.
+
+###### Proof.
+
+Let us define $\tilde{Y}=\neg Y$ . Then, the strategy profile where every agent reports their true belief over $\tilde{Y}$ and the belief profile where every agent believes every other agent reports truthfully (allowing for arbitrary updates if an agent reports an invalid posterior off the equilibrium path) is a $\varepsilon-$ perfect Bayesian equilibrium by Theorem 6. Yet, this is equivalent to the strategy and belief profiles with permuted reports and beliefs; hence, the permutation strategy and belief profile is also a $\varepsilon-$ perfect Bayesian equilibrium.
+∎
+
+## Appendix D Proofs
+
+#### Lemma 1.
+
+Agent $t$ ’s expectation of agent $r$ ’s true posterior ${\tilde{p}}_{1}^{(r)}=\mathbb{P}(Y=1|x^{(r)},\tilde{x}^{(t)},x^{(s)})$ is:
+
+ | 
+ | $\small\mathbb{E}[{\tilde{p}}_{1}^{(r)}|x^{(t)},x^{(s)}]=\mathbb{P}(Y=1|x^{(t)},x^{(s)})+\Delta(\Omega_{X_{r}},\tilde{x}^{(t)},{x}^{(t)},x^{(s)})$ 
+ | 
+ | (14)
+
+where $\Delta(\Omega_{X_{r}},\tilde{x}^{(t)},{x}^{(t)},x^{(s)})=\mu(\Omega_{X_{r}},\tilde{x}^{(t)},x^{(s)})\cdot\rho(\tilde{x}^{(t)},x^{(t)},x^{(s)})$ , with 
+
+ | 
+ | $\small\begin{split}\mu(\Omega_{X_{r}},\tilde{x}^{(t)},x^{(s)})&=\sum_{x^{(r)}\in\Omega_{X_{r}}}\frac{1}{\frac{1}{\mathbb{P}(x^{(r)},Y=1|\tilde{x}^{(t)},x^{(s)})}+\frac{1}{\mathbb{P}(x^{(r)},Y=0|\tilde{x}^{(t)},x^{(s)})}}\\
+\rho(\tilde{x}^{(t)},x^{(t)},x^{(s)})&=\frac{\mathbb{P}(Y=1|\tilde{x}^{(t)},x^{(s)})-\mathbb{P}(Y=1|x^{(t)},x^{(s)})}{\mathbb{P}(Y=0|\tilde{x}^{(t)},x^{(s)})\cdot\mathbb{P}(Y=1|\tilde{x}^{(t)},x^{(s)})}\end{split}$ 
+ | 
+ | (15)
+
+###### Proof.
+
+We denote agent $r$ ’s potentially misinformed but truthful report as $\tilde{\bf p}^{(r)}=\mathbb{P}(Y|x^{(r)},\tilde{x}^{(t)},x^{(s)})$ . To be clear, although agent $t$ expects agent $r$ to update as if they they learned $X^{(t)}=\tilde{x}^{(t)}$ , agent $t$ ’s true signal is $X^{(t)}=x^{(t)}$ and so takes the expectation of agent $r$ ’s information accordingly. Thus, agent $t$ ’s expectation of agent $r$ ’s posterior (for $Y=1$ ) given their signal is $x^{(t)}$ and they report $X^{(t)}=\tilde{x}^{(t)}$ is:
+
+ | 
+ | $\displaystyle\small\mathbb{E}[{\tilde{p}}_{1}^{(r)}|x^{(t)},x^{(s)}]$ 
+ | $\displaystyle=\mathbb{E}_{Y|x^{(t)},x^{(s)}}\left(\mathbb{E}[{\tilde{p}}_{1}^{(r)}|x^{(t)},x^{(s)},Y]\right)$ 
+ | 
+
+ | 
+ | 
+ | $\displaystyle=\mathbb{E}_{Y|x^{(t)},x^{(s)}}\left(\mathbb{E}[{\tilde{p}}_{1}^{(r)}|Y]\right)$ 
+ | 
+ | (by Assumption 4)
+
+ | 
+ | 
+ | $\displaystyle=\mathbb{P}(Y=0|x^{(t)},x^{(s)})\cdot\mathbb{E}[{\tilde{p}}_{1}^{(r)}|Y=0]+\mathbb{P}(Y=1|x^{(t)},x^{(s)})\cdot\mathbb{E}[{\tilde{p}}_{1}^{(r)}|Y=1]$ 
+ | 
+ | (16)
+
+We break down the computation of this expectation into three parts. First we write down the expression for agent $r$ ’s potentially misinformed posterior $\tilde{\bf p}^{(r)}$ , then compute the conditional-on- $Y$ expectations, and subsequently compute Equation 16.
+
+#### Step 1: (Computing ${\tilde{p}}_{1}^{(r)}$ )
+
+Agent $r$ ’s posterior ${\tilde{\bf p}}^{(r)}$ will depend on all the information available to them, including information $x^{(r)}$ that agent $t$ does not have access to:
+
+ | 
+ | $\small{\tilde{p}}_{1}^{(r)}=\mathbb{P}(Y=1|x^{(r)},\tilde{x}^{(t)},x^{(s)})$ 
+ | 
+ | (17)
+
+#### Step 2: (Computing $\mathbb{E}[{\tilde{p}}_{1}^{(r)}|Y]$ )
+
+First, we compute the expectation of the misinformed posterior probability ${\tilde{p}}_{1}^{(r)}=\mathbb{P}(Y=1|x^{(r)},\tilde{x}^{(t)},x^{(s)})$ when in reality $Y=1$ :
+
+ | 
+ | $\small\begin{split}\mathbb{E}[{\tilde{p}}_{1}^{(r)}|Y=1]&=\sum_{x^{(r)}}\mathbb{P}(x^{(r)}|Y=1)\cdot\mathbb{P}(Y=1|x^{(r)},\tilde{x}^{(t)},x^{(s)})\\
+&=\sum_{x^{(r)}}\mathbb{P}(x^{(r)}|Y=1)\cdot\left(1-\mathbb{P}(Y=0|x^{(r)},\tilde{x}^{(t)},x^{(s)})\right)\\
+&=\sum_{x^{(r)}}\mathbb{P}(x^{(r)}|Y=1)-\sum_{x^{(r)}}\mathbb{P}(x^{(r)}|Y=1)\cdot\frac{\mathbb{P}(x^{(r)}|Y=0)\mathbb{P}(\tilde{x}^{(t)},x^{(s)}|Y=0)\mathbb{P}(Y=0)}{\mathbb{P}(x^{(r)},\tilde{x}^{(t)},x^{(s)})}\\
+&=1-\sum_{x^{(r)}}\frac{\mathbb{P}(x^{(r)}|Y=0)\mathbb{P}(Y=0|\tilde{x}^{(t)},x^{(s)})\cdot\mathbb{P}(x^{(r)}|Y=1)}{\mathbb{P}(x^{(r)}|\tilde{x}^{(t)},x^{(s)})}\\
+&=1-\frac{1}{\mathbb{P}(Y=1|\tilde{x}^{(t)},x^{(s)})}\sum_{x^{(r)}}\frac{\mathbb{P}(x^{(r)},Y=0|\tilde{x}^{(t)},x^{(s)})\cdot\mathbb{P}(x^{(r)},Y=1|\tilde{x}^{(t)},x^{(s)})}{\mathbb{P}(x^{(r)},Y=0|\tilde{x}^{(t)},x^{(s)})+\mathbb{P}(x^{(r)},Y=1|\tilde{x}^{(t)},x^{(s)})}\\
+&=1-\frac{\mu(\Omega_{X_{r}},\tilde{x}^{(t)},x^{(s)})}{\mathbb{P}(Y=1|\tilde{x}^{(t)},x^{(s)})}\end{split}$ 
+ | 
+
+where
+
+ | 
+ | $\small\mu(\Omega_{X_{r}},\tilde{x}^{(t)},x^{(s)}):=\sum_{x^{(r)}\in\Omega_{X_{r}}}\frac{1}{\frac{1}{\mathbb{P}(x^{(r)},Y=1|\tilde{x}^{(t)},x^{(s)})}+\frac{1}{\mathbb{P}(x^{(r)},Y=0|\tilde{x}^{(t)},x^{(s)})}}$ 
+ | 
+ | (18)
+
+This is the sum of (half) harmonic means of the joint probability of the agent $r$ ’s private information $x^{(r)}$ under $Y=1$ and $Y=0$ given information $x^{(s)}$ and $X^{(t)}=\tilde{x}^{(t)}$ , summed over all of agent $r$ ’s possible private signals $x^{(r)}$ .
+Similarly, we can compute the expectation of the misinformed posterior probability ${\tilde{p}}_{1}^{(r)}=\mathbb{P}(Y=1|x^{(r)},\tilde{x}^{(t)},x^{(s)})$ when in reality $Y=0$ :
+
+ | 
+ | $\displaystyle\small\mathbb{E}[{\tilde{p}}_{1}^{(r)}|Y=0]$ 
+ | $\displaystyle=\sum_{x^{(r)}}\mathbb{P}(x^{(r)}|Y=0)\cdot\mathbb{P}(Y=1|x^{(r)},\tilde{x}^{(t)},x^{(s)})$ 
+ | 
+
+ | 
+ | 
+ | $\displaystyle=\sum_{x^{(r)}}\mathbb{P}(x^{(r)}|Y=0)\cdot\frac{\mathbb{P}(x^{(r)}|Y=1)\mathbb{P}(\tilde{x}^{(t)},x^{(s)}|Y=1)\mathbb{P}(Y=1)}{\mathbb{P}(x^{(r)},\tilde{x}^{(t)},x^{(s)})}$ 
+ | 
+
+ | 
+ | 
+ | $\displaystyle=\sum_{x^{(r)}}\frac{\mathbb{P}(x^{(r)}|Y=0)\cdot\mathbb{P}(x^{(r)}|Y=1)\mathbb{P}(Y=1|\tilde{x}^{(t)},x^{(s)})}{\mathbb{P}(x^{(r)}|\tilde{x}^{(t)},x^{(s)})}$ 
+ | 
+
+ | 
+ | 
+ | $\displaystyle=\frac{1}{\mathbb{P}(Y=0|\tilde{x}^{(t)},x^{(s)})}\sum_{x^{(r)}}\frac{\mathbb{P}(x^{(r)},Y=0|\tilde{x}^{(t)},x^{(s)})\cdot\mathbb{P}(x^{(r)},Y=1|\tilde{x}^{(t)},x^{(s)})}{\mathbb{P}(x^{(r)},Y=0|\tilde{x}^{(t)},x^{(s)})+\mathbb{P}(x^{(r)},Y=1|\tilde{x}^{(t)},x^{(s)})}$ 
+ | 
+
+ | 
+ | 
+ | $\displaystyle=\frac{\mu(\Omega_{X_{r}},\tilde{x}^{(t)},x^{(s)})}{\mathbb{P}(Y=0|\tilde{x}^{(t)},x^{(s)})}$ 
+ | 
+ | (19)
+
+#### Step 3: (Computing $\mathbb{E}[{\tilde{p}}_{1}^{(r)}|x^{(t)},x^{(s)}])$ 
+
+Finally, we can compute agent $t$ ’s expectation of agent $r$ ’s posterior when they report the posterior associated with $\tilde{x}^{(t)}$ using Equation 16:
+
+ | 
+ | $\small\begin{split}\mathbb{E}[{\tilde{p}}_{1}^{(r)}|x^{(t)},x^{(s)}]&=\mathbb{P}(Y=0|x^{(t)},x^{(s)})\cdot\mathbb{E}[{\tilde{p}}_{1}^{(r)}|Y=0]+\mathbb{P}(Y=1|x^{(t)},x^{(s)})\cdot\mathbb{E}[{\tilde{p}}_{1}^{(r)}|Y=1]\\
+&=\mathbb{P}(Y=0|x^{(t)},x^{(s)})\cdot\frac{\mu(\Omega_{X_{r}},\tilde{x}^{(t)},x^{(s)})}{\mathbb{P}(Y=0|\tilde{x}^{(t)},x^{(s)})}+\mathbb{P}(Y=1|x^{(t)},x^{(s)})\cdot\left(1-\frac{\mu(\Omega_{X_{r}},\tilde{x}^{(t)},x^{(s)})}{\mathbb{P}(Y=1|\tilde{x}^{(t)},x^{(s)})}\right)\\
+&=\mathbb{P}(Y=1|x^{(t)},x^{(s)})+\mu(\Omega_{X_{r}},\tilde{x}^{(t)},x^{(s)})\left(\frac{\mathbb{P}(Y=0|x^{(t)},x^{(s)})}{\mathbb{P}(Y=0|\tilde{x}^{(t)},x^{(s)})}-\frac{\mathbb{P}(Y=1|x^{(t)},x^{(s)})}{\mathbb{P}(Y=1|\tilde{x}^{(t)},x^{(s)})}\right)\\
+&=\mathbb{P}(Y=1|x^{(t)},x^{(s)})+\mu(\Omega_{X_{r}},\tilde{x}^{(t)},x^{(s)})\left(\frac{\mathbb{P}(Y=1|\tilde{x}^{(t)},x^{(s)})-\mathbb{P}(Y=1|x^{(t)},x^{(s)})}{\mathbb{P}(Y=0|\tilde{x}^{(t)},x^{(s)})\cdot\mathbb{P}(Y=1|\tilde{x}^{(t)},x^{(s)})}\right)\\
+&=\mathbb{P}(Y=1|x^{(t)},x^{(s)})+\mu(\Omega_{X_{r}},\tilde{x}^{(t)},x^{(s)})\cdot\rho(\tilde{x}^{(t)},x^{(t)},x^{(s)})\end{split}$ 
+ | 
+ | (20)
+
+where we defined:
+
+ | 
+ | $\small\rho(\tilde{x}^{(t)},x^{(t)},x^{(s)}):=\frac{\mathbb{P}(Y=1|\tilde{x}^{(t)},x^{(s)})-\mathbb{P}(Y=1|x^{(t)},x^{(s)})}{\mathbb{P}(Y=0|\tilde{x}^{(t)},x^{(s)})\cdot\mathbb{P}(Y=1|\tilde{x}^{(t)},x^{(s)})}$ 
+ | 
+ | (21)
+
+∎
+
+#### Theorem 1. 
+
+Suppose a reference agent $r$ can observe $k$ private signals $x^{(1)},\ldots,x^{(k)}$ that are informational substitutes, where $\Omega_{X^{(r)}}=\Omega_{X^{(1)}}\times\ldots\times\Omega_{X^{(k)}}$ and $x^{(j)}\in\Omega_{X^{(j)}}$ , and agent $t$ cannot observe these signals. Then, agent $t$ ’s adjustment $\Delta$ of their posterior to predict their reference agent’s true posterior is upper bounded in magnitude as $|\Delta(\Omega_{X_{r}},\tilde{x}^{(t)},x^{(t)},x^{(s)})|\leq\frac{1}{4}\left({{\frac{1-\eta}{\eta}}}-{{\frac{\eta}{1-\eta}}}\right)\left(1-\delta\right)^{k}$ .
+Consequently, we have an upper bound $|\Delta|\leq\varepsilon^{\prime}$ for any $k$ where
+
+ | 
+ | $\small k\geq\frac{1}{-\log\left(1-\delta\right)}\log\left(\frac{1}{4\varepsilon^{\prime}}\left({{\frac{1-\eta}{\eta}}}-{{\frac{\eta}{1-\eta}}}\right)\right)$ 
+ | 
+ | (22)
+
+###### Proof.
+
+ $\mu(\Omega_{X_{r}},\tilde{x}^{(t)},x^{(s)})$ (defined in Equation 18)is non-negative (as a harmonic mean of probabilities) and we can upper bound it using the property that the harmonic mean is always less than the geometric mean:
+
+ | 
+ | $\small\begin{split}\mu(\Omega_{X_{r}},\tilde{x}^{(t)},x^{(s)})&=\sum_{x^{(r)}\in\Omega_{X_{r}}}\frac{1}{\frac{1}{\mathbb{P}(x^{(r)},Y=1|\tilde{x}^{(t)},x^{(s)})}+\frac{1}{\mathbb{P}(x^{(r)},Y=0|\tilde{x}^{(t)},x^{(s)})}}\\
+&\leq\sum_{x^{(r)}\in\Omega_{X_{r}}}\frac{1}{2}\left(\mathbb{P}(x^{(r)},Y=0|\tilde{x}^{(t)},x^{(s)})\cdot\mathbb{P}(x^{(r)},Y=1|\tilde{x}^{(t)},x^{(s)})\right)^{\frac{1}{2}}\\
+&=\sum_{x^{(r)}\in\Omega_{X_{r}}}\frac{1}{2}\left[\mathbb{P}(x^{(r)}|Y=0)\mathbb{P}(Y=0|\tilde{x}^{(t)},x^{(s)})\right]^{\frac{1}{2}}\left[\mathbb{P}(x^{(r)}|Y=1)\mathbb{P}(Y=1|\tilde{x}^{(t)},x^{(s)})\right]^{\frac{1}{2}}\\
+&=\frac{1}{2}\left(\mathbb{P}(Y=0|\tilde{x}^{(t)},x^{(s)})\cdot\mathbb{P}(Y=1|\tilde{x}^{(t)},x^{(s)})\right)^{\frac{1}{2}}\sum_{x^{(r)}\in\Omega_{X_{r}}}\left(\prod_{i=1}^{k}\left(\mathbb{P}(x^{(r_{i})}|Y=0)\cdot\mathbb{P}(x^{(r_{i})}|Y=1)\right)^{\frac{1}{2}}\right)\\
+&=\frac{1}{2}\left(\mathbb{P}(Y=0|\tilde{x}^{(t)},x^{(s)})\cdot\mathbb{P}(Y=1|\tilde{x}^{(t)},x^{(s)})\right)^{\frac{1}{2}}\prod_{i=1}^{k}\left(\sum_{j=1}^{N}\left(\mathbb{P}(x^{(r_{i})}_{j}|Y=0)\cdot\mathbb{P}(x^{(r_{i})}_{j}|Y=1)\right)^{\frac{1}{2}}\right)\\
+&=\frac{1}{2}\left(\mathbb{P}(Y=0|\tilde{x}^{(t)},x^{(s)})\cdot\mathbb{P}(Y=1|\tilde{x}^{(t)},x^{(s)})\right)^{\frac{1}{2}}\prod_{i=1}^{k}\left(1-\delta^{(r_{i})}\right)\\
+&\leq\frac{1}{2}\left(\mathbb{P}(Y=0|\tilde{x}^{(t)},x^{(s)})\cdot\mathbb{P}(Y=1|\tilde{x}^{(t)},x^{(s)})\right)^{\frac{1}{2}}\left(1-\delta\right)^{k}\end{split}$ 
+ | 
+ | (23)
+
+where $1-\delta^{(r_{i})}$ is the Bhattacharyya coefficient for signal $x^{(r_{i})}$ (Definition 1). Thus, we have:
+
+ | 
+ | $\small|\Delta|\leq\frac{1}{2}\left(1-\delta\right)^{k}\frac{\mathbb{P}(Y=1|\tilde{x}^{(t)},x^{(s)})-\mathbb{P}(Y=1|x^{(t)},x^{(s)})}{\left(\mathbb{P}(Y=0|\tilde{x}^{(t)},x^{(s)})\cdot\mathbb{P}(Y=1|\tilde{x}^{(t)},x^{(s)})\right)^{\frac{1}{2}}}$ 
+ | 
+ | (24)
+
+Now, observe that we can write the posterior as:
+
+ | 
+ | $\small\begin{split}\mathbb{P}(Y=1|\tilde{x}^{(t)},x^{(s)})&=\frac{\mathbb{P}(\tilde{x}^{(t)}|Y=1)\mathbb{P}(Y=1|x^{(s)})\mathbb{P}(x^{(s)})}{\mathbb{P}(\tilde{x}^{(t)}|Y=0)\mathbb{P}(Y=0|x^{(s)})\mathbb{P}(x^{(s)})+\mathbb{P}(\tilde{x}^{(t)}|Y=1)\mathbb{P}(Y=1|x^{(s)})\mathbb{P}(x^{(s)})}\\
+&=\frac{\mathbb{P}(\tilde{x}^{(t)}|Y=1)\mathbb{P}(Y=1|x^{(s)})}{\mathbb{P}(\tilde{x}^{(t)}|x^{(s)})}\end{split}$ 
+ | 
+ | (25)
+
+Then, we can manipulate the term in the upper bound as:
+
+ | 
+ | $\tiny\begin{split}\frac{\mathbb{P}(Y=1|\tilde{x}^{(t)},x^{(s)})-\mathbb{P}(Y=1|x^{(t)},x^{(s)})}{\left(\mathbb{P}(Y=0|\tilde{x}^{(t)},x^{(s)})\cdot\mathbb{P}(Y=1|\tilde{x}^{(t)},x^{(s)})\right)^{\frac{1}{2}}}&=\sqrt{\frac{\mathbb{P}(Y=1|\tilde{x}^{(t)},x^{(s)})}{\mathbb{P}(Y=0|\tilde{x}^{(t)},x^{(s)})}}-\frac{\mathbb{P}(Y=1|{x}^{(t)},x^{(s)})}{\sqrt{\mathbb{P}(Y=1|\tilde{x}^{(t)},x^{(s)})\mathbb{P}(Y=0|\tilde{x}^{(t)},x^{(s)})}}\\
+&=\sqrt{\frac{\mathbb{P}(\tilde{x}^{(t)}|Y=1)\mathbb{P}(Y=1|x^{(s)})}{\mathbb{P}(\tilde{x}^{(t)}|Y=0)\mathbb{P}(Y=0|x^{(s)})}}\\
+&\phantom{=}-\frac{\mathbb{P}(\tilde{x}^{(t)}|x^{(s)})}{\mathbb{P}({x}^{(t)}|x^{(s)})}\frac{\mathbb{P}({x}^{(t)}|Y=1)\sqrt{\mathbb{P}(Y=1|x^{(s)})}}{\sqrt{\mathbb{P}(\tilde{x}^{(t)}|Y=1)\mathbb{P}(\tilde{x}^{(t)}|Y=0)\mathbb{P}(Y=0|x^{(s)})}}\\
+&=\frac{\sqrt{\mathbb{P}(Y=1|x^{(s)})}}{\mathbb{P}({x}^{(t)}|x^{(s)})\sqrt{\mathbb{P}(\tilde{x}^{(t)}|Y=0)\mathbb{P}(Y=0|x^{(s)})}}\\
+&\phantom{=}\cdot\left(\frac{\mathbb{P}({x}^{(t)}|x^{(s)}){\mathbb{P}(\tilde{x}^{(t)}|Y=1)}-\mathbb{P}(\tilde{x}^{(t)}|x^{(s)})\mathbb{P}({x}^{(t)}|Y=1)}{\sqrt{\mathbb{P}(\tilde{x}^{(t)}|Y=1)}}\right)\\
+&=\frac{\sqrt{\mathbb{P}(Y=1|x^{(s)})\mathbb{P}(Y=0|x^{(s)})}}{\mathbb{P}({x}^{(t)}|x^{(s)})\sqrt{\mathbb{P}(\tilde{x}^{(t)}|Y=0)}}\\
+&\phantom{=}\cdot\left(\frac{\mathbb{P}(\tilde{x}^{(t)}|Y=1)\mathbb{P}({x}^{(t)}|Y=0)-\mathbb{P}(\tilde{x}^{(t)}|Y=0)\mathbb{P}({x}^{(t)}|Y=1)}{\sqrt{\mathbb{P}(\tilde{x}^{(t)}|Y=1)}}\right)\\
+&=\frac{\sqrt{\mathbb{P}(Y=1|x^{(s)})\mathbb{P}(Y=0|x^{(s)})}}{\mathbb{P}({x}^{(t)}|x^{(s)})}\\
+&\phantom{=}\cdot\left(\frac{\mathbb{P}(\tilde{x}^{(t)}|Y=1)\mathbb{P}({x}^{(t)}|Y=0)}{\sqrt{\mathbb{P}(\tilde{x}^{(t)}|Y=1)\mathbb{P}(\tilde{x}^{(t)}|Y=0)}}-\frac{\mathbb{P}(\tilde{x}^{(t)}|Y=0)\mathbb{P}({x}^{(t)}|Y=1)}{\sqrt{\mathbb{P}(\tilde{x}^{(t)}|Y=1)\mathbb{P}(\tilde{x}^{(t)}|Y=0)}}\right)\\
+&=\frac{\sqrt{\mathbb{P}(Y=1|x^{(s)})\mathbb{P}(Y=0|x^{(s)})}}{\mathbb{P}({x}^{(t)}|x^{(s)})}\\
+&\phantom{=}\cdot\left({\mathbb{P}({x}^{(t)}|Y=0)}{\sqrt{\frac{\mathbb{P}(\tilde{x}^{(t)}|Y=1)}{\mathbb{P}(\tilde{x}^{(t)}|Y=0)}}}-\mathbb{P}({x}^{(t)}|Y=1){\sqrt{\frac{\mathbb{P}(\tilde{x}^{(t)}|Y=0)}{\mathbb{P}(\tilde{x}^{(t)}|Y=1)}}}\right)\\
+&\leq\frac{\sqrt{\mathbb{P}(Y=1|x^{(s)})\mathbb{P}(Y=0|x^{(s)})}}{\mathbb{P}({x}^{(t)}|Y=0)\mathbb{P}(Y=0|x^{(s)})+\mathbb{P}({x}^{(t)}|Y=1)\mathbb{P}(Y=1|x^{(s)})}\\
+&\phantom{=}\cdot\left({\mathbb{P}({x}^{(t)}|Y=0)}{\sqrt{\frac{1-\eta}{\eta}}}-\mathbb{P}({x}^{(t)}|Y=1){\sqrt{\frac{\eta}{1-\eta}}}\right)\\
+&\leq\frac{\sqrt{\frac{\mathbb{P}({x}^{(t)}|Y=0)\mathbb{P}({x}^{(t)}|Y=1)}{(\mathbb{P}({x}^{(t)}|Y=0)+\mathbb{P}({x}^{(t)}|Y=1))^{2}}}}{\frac{\mathbb{P}({x}^{(t)}|Y=0)\mathbb{P}({x}^{(t)}|Y=1)}{\mathbb{P}({x}^{(t)}|Y=0)+\mathbb{P}({x}^{(t)}|Y=1)}+\frac{\mathbb{P}({x}^{(t)}|Y=1)\mathbb{P}({x}^{(t)}|Y=0)}{\mathbb{P}({x}^{(t)}|Y=0)+\mathbb{P}({x}^{(t)}|Y=1)}}\\
+&\phantom{=}\cdot\left({\mathbb{P}({x}^{(t)}|Y=0)}{\sqrt{\frac{1-\eta}{\eta}}}-\mathbb{P}({x}^{(t)}|Y=1){\sqrt{\frac{\eta}{1-\eta}}}\right)\\
+&=\frac{1}{2\cdot\sqrt{\mathbb{P}({x}^{(t)}|Y=0)\mathbb{P}({x}^{(t)}|Y=1)}}\\
+&\phantom{=}\cdot\left({\mathbb{P}({x}^{(t)}|Y=0)}{\sqrt{\frac{1-\eta}{\eta}}}-\mathbb{P}({x}^{(t)}|Y=1){\sqrt{\frac{\eta}{1-\eta}}}\right)\\
+&=\frac{1}{2}\left(\sqrt{\frac{\mathbb{P}({x}^{(t)}|Y=0)}{\mathbb{P}({x}^{(t)}|Y=1)}}{\sqrt{\frac{1-\eta}{\eta}}}-\sqrt{\frac{\mathbb{P}({x}^{(t)}|Y=1)}{\mathbb{P}({x}^{(t)}|Y=0)}}{\sqrt{\frac{\eta}{1-\eta}}}\right)\\
+&\leq\frac{1}{2}\left({\sqrt{\frac{1-\eta}{\eta}}\sqrt{\frac{1-\eta}{\eta}}}-\sqrt{\frac{\eta}{1-\eta}}{\sqrt{\frac{\eta}{1-\eta}}}\right)\\
+&=\frac{1}{2}\left({{\frac{1-\eta}{\eta}}}-{{\frac{\eta}{1-\eta}}}\right)\end{split}$ 
+ | 
+ | (26)
+
+By a similar procedure, we can establish that $-\frac{\mathbb{P}(Y=1|\tilde{x}^{(t)},x^{(s)})-\mathbb{P}(Y=1|x^{(t)},x^{(s)})}{\left(\mathbb{P}(Y=0|\tilde{x}^{(t)},x^{(s)})\cdot\mathbb{P}(Y=1|\tilde{x}^{(t)},x^{(s)})\right)^{\frac{1}{2}}}\leq\frac{1}{2}\left({{\frac{1-\eta}{\eta}}}-{{\frac{\eta}{1-\eta}}}\right)$ . Thus, we have that:
+
+ | 
+ | $\small\begin{split}\left|\mu(\Omega_{X_{r}},\tilde{x}^{(t)},x^{(s)})\cdot\rho(\tilde{x}^{(t)},{x}^{(t)},x^{(s)})\right|&\leq\frac{1}{4}\left({{\frac{1-\eta}{\eta}}}-{{\frac{\eta}{1-\eta}}}\right)\left(1-\delta\right)^{k}\end{split}$ 
+ | 
+ | (27)
+
+Thus, we can upper bound Equation 27 with any desired upper bound $\varepsilon$ and invert to find $k$ such that $|\mu(\Omega_{X_{r}},\tilde{x}^{(t)},x^{(s)})\cdot\rho(\tilde{x}^{(t)},{x}^{(t)},x^{(s)})|\leq\varepsilon$ :
+
+ | 
+ | $\small k\geq\frac{1}{-\log\left(1-\delta\right)}\log\left(\frac{1}{4\varepsilon}\left({{\frac{1-\eta}{\eta}}}-{{\frac{\eta}{1-\eta}}}\right)\right)$ 
+ | 
+ | (28)
+
+∎
+
+#### Theorem 2.
+
+Suppose agent $t$ is paid based on a cross-entropy scoring rule with respect to agent $r$ who reports truthfully. Then, agent $t$ strictly maximizes their expected payoff by reporting truthfully if the reference agent has at least $k$ signals where
+
+ | 
+ | $k>\frac{1}{-\log\left(1-\delta\right)}\log\left(\frac{\left|\log\left(\frac{1-\eta}{\eta}\right)\right|\left({{\frac{1-\eta}{\eta}}}-{{\frac{\eta}{1-\eta}}}\right)}{8\left(\tau\eta(1-\eta)\right)^{2}}\right)$ 
+ | 
+ | (29)
+
+###### Proof.
+
+We proceed as follows:
+
+Step 1: Condition for strict truthfulness In order for truthful reporting to pay more than any strategic misreport, we consider the difference in expected scores when reporting the truth ${\bf p}^{(t)}$ relative to reporting some other potentially better report ${\bf q}^{(t)}$ (that is consistent with signal $\tilde{x}^{(t)}$ :
+
+ | 
+ | $\begin{split}\mathbb{E}[S_{CE}({\bf q}^{(t)})|\hat{X}^{(t)}]-\mathbb{E}[S_{CE}({\bf p}^{(t)})|\hat{X}^{(t)}]&=-H\left(\mathbb{E}\left[\tilde{\bf p}^{(r)}\left.\right|\hat{X}^{(t)}\right],{\bf q}^{(t)}\right)+H\left({\bf p}^{(t)}\right)\\
+&=-H\left({\bf p}^{(t)}+\Delta,{\bf q}^{(t)}\right)+H\left({\bf p}^{(t)}\right)\\
+&=({p_{1}}^{(t)}+\Delta)\log\left({{q_{1}}^{(t)}}\right)+(1-{p_{1}}^{(t)}-\Delta)\log\left({1-{q_{1}}^{(t)}}\right)\\
+&\phantom{=}-{p_{1}}^{(t)}\log\left({{p_{1}}^{(t)}}\right)-(1-{p_{1}}^{(t)})\log\left({1-{p_{1}}^{(t)}}\right)\\
+&=({p_{1}}^{(t)}+\Delta)\log\left({{q_{1}}^{(t)}}\right)+(1-{p_{1}}^{(t)}-\Delta)\log\left({1-{q_{1}}^{(t)}}\right)\\
+&\phantom{=}-{p_{1}}^{(t)}\log\left({{p_{1}}^{(t)}}\right)-(1-{p_{1}}^{(t)})\log\left({1-{p_{1}}^{(t)}}\right)\\
+&=\Delta\log\left(\frac{q_{1}^{(t)}}{1-q_{1}^{(t)}}\right)-\text{KL}({\bf p}^{(t)}\|{\bf q}^{(t)})\end{split}$ 
+ | 
+ | (30)
+
+Thus, truthful reporting yields higher utility over reporting ${\bf q}^{(t)}$ when:
+
+ | 
+ | $\Delta\log\left(\frac{q_{1}^{(t)}}{1-q_{1}^{(t)}}\right)-\text{KL}({\bf p}^{(t)}\|{\bf q}^{(t)})
+ | 
+ | (31)
+
+The KL term is always positive. We see that when $\frac{1}{2}0$ and $\Deltaq_{1}^{(t)}>p_{1}^{(t)}$ , we have $\log\left(\frac{q_{1}^{(t)}}{1-q_{1}^{(t)}}\right)0$ , so again the condition is satisfied. Thus, the only way agent $t$ can extract greater reward is by reporting more extreme beliefs: when $\frac{1}{2}\leq p_{1}^{(t)}q_{1}^{(t)}$ , leveraging the idea that approximate agreement at the extremes is higher payoff than exact agreement in the middle given the convexity of cross-entropy.
+
+Thus, truthful reporting yields higher utility over reporting ${\bf q}^{(t)}$ when:
+
+ | 
+ | $|\Delta|
+ | 
+ | (32)
+
+Step 2: Lower bound for KL Divergence Next, observe that by Pinsker’s inequality, we have:
+
+ | 
+ | $\begin{split}\text{KL}({\bf p}^{(t)}\|{\bf q}^{(t)})\geq 2\left|p_{1}^{(t)}-q_{1}^{(t)}\right|^{2}\end{split}$ 
+ | 
+ | (33)
+
+Writing $\lambda_{p}=\log\left(\frac{p_{1}^{(t)}}{1-p_{1}^{(t)}}\right)$ , $\lambda_{q}=\log\left(\frac{q_{1}^{(t)}}{1-q_{1}^{(t)}}\right)$ , and $\phi(\lambda)=\log(1+\exp\left(\lambda\right))$ , we have that $p_{1}^{(t)}=\phi^{\prime}(\lambda_{p})$ and $q_{1}^{(t)}=\phi^{\prime}(\lambda_{q})$ . Thus, we can re-write the KL bound as:
+
+ | 
+ | $\begin{split}\text{KL}({\bf p}^{(t)}\|{\bf q}^{(t)})\geq 2\left|\phi^{\prime}(\lambda_{p})-\phi^{\prime}(\lambda_{q})\right|^{2}\end{split}$ 
+ | 
+ | (34)
+
+By the mean value theorem, we have that $\left|\phi^{\prime}(\lambda_{p})-\phi^{\prime}(\lambda_{q})\right|=\phi^{\prime\prime}(\tilde{\lambda})\left|\lambda_{p}-\lambda_{q}\right|$ for some $\tilde{\lambda}$ in the interval between $\lambda_{p}$ and $\lambda_{q}$ , allowing us to write:
+
+ | 
+ | $\begin{split}\text{KL}({\bf p}^{(t)}\|{\bf q}^{(t)})\geq 2\left(\phi^{\prime\prime}(\tilde{\lambda})\right)^{2}\left|\lambda_{p}-\lambda_{q}\right|^{2}\end{split}$ 
+ | 
+ | (35)
+
+Next, we can pull out the prior information. Let the log odds of the prior be $\lambda_{y}=\log\left(\frac{y_{1}}{y_{0}}\right)$ , the log likelihood of the shared information be $\lambda_{s}=\log\left(\frac{\mathbb{P}(x^{(s)}|Y=1)}{\mathbb{P}(x^{(s)}|Y=0)}\right)$ , and the log-likelihood of the reported signal be $\lambda_{\tilde{x}}=\log\left(\frac{\mathbb{P}(\tilde{x}^{(t)}|Y=1)}{\mathbb{P}(\tilde{x}^{(t)}|Y=0)}\right)$ . Then, if ${\bf x}^{(t)}$ is the signal that induced belief ${\bf p}^{(t)}$ and ${\bf{\tilde{x}}}^{(t)}$ the signal that would induce belief ${\bf q}^{(t)}$ , by Assumption 4 we have that $\lambda_{p}=\lambda_{y}+\lambda_{s}+\lambda_{x}$ and $\lambda_{q}=\lambda_{y}+\lambda_{s}+\lambda_{\tilde{x}}$ . Then, we can re-write the KL as:
+
+ | 
+ | $\text{KL}({\bf p}^{(t)}\|{\bf q}^{(t)})\geq 2\left(\phi^{\prime\prime}(\tilde{\lambda})\right)^{2}\left|\lambda_{x}-\lambda_{\tilde{x}}\right|^{2}$ 
+ | 
+ | (36)
+
+Then, from $\tau$ -granularity where $\tau=\min_{x,\tilde{x}}|\lambda_{x}-\lambda_{\tilde{x}}|$ and $\phi^{\prime\prime}(\lambda)=\sigma(\tilde{\lambda})(1-\sigma(\tilde{\lambda})\geq\eta(1-\eta)$ , allowing us to write:
+
+ | 
+ | $\text{KL}({\bf p}^{(t)}\|{\bf q}^{(t)})\geq 2\left(\eta(1-\eta)\tau\right)^{2}$ 
+ | 
+ | (37)
+
+Step 3: Incorporating the KL bound into the condition Re-visiting the inequality for $\Delta$ , and observing that ${\left|\log\left(\frac{q_{1}^{(t)}}{1-q_{1}^{(t)}}\right)\right|}=|\lambda_{q}|=|\lambda_{y}+\lambda_{s}+\lambda_{\tilde{x}}|\leq{\left|\lambda_{y}+2\log\left(\frac{1-\eta}{\eta}\right)\right|}$ , we can write:
+
+ | 
+ | $\frac{\text{KL}({\bf p}^{(t)}\|{\bf q}^{(t)})}{\left|\log\left(\frac{q_{1}^{(t)}}{1-q_{1}^{(t)}}\right)\right|}\geq\frac{2\left(\eta(1-\eta)\tau\right)^{2}}{\left|\lambda_{y}+2\log\left(\frac{1-\eta}{\eta}\right)\right|}$ 
+ | 
+ | (38)
+
+This gives us an upper bound for $\Delta$ that will ensure strict truthfulness:
+
+ | 
+ | $\begin{split}|\Delta|
+ | 
+ | (39)
+
+Using the upper bound on $\Delta$ from Theorem 1, we can identify the needed $k$ :
+
+ | 
+ | $\begin{split}\frac{1}{4}\left({{\frac{1-\eta}{\eta}}}-{{\frac{\eta}{1-\eta}}}\right)\left(1-\delta\right)^{k}&\frac{1}{-\log\left(1-\delta\right)}\log\left(\frac{\left|\log\left(\frac{y_{1}(1-\eta)^{2}}{y_{0}\eta^{2}}\right)\right|\left({{\frac{1-\eta}{\eta}}}-{{\frac{\eta}{1-\eta}}}\right)}{8\left(\eta(1-\eta)\tau\right)^{2}}\right)\end{split}$ 
+ | 
+ | (40)
+
+∎
+
+#### Theorem 6
+
+If agent $t$ is paid based on a cross-entropy scoring rule with respect to agent $r$ who reports truthfully, the difference in expected payoff when deviating from truthful report ${\bf p}^{(t)}$ associated with signal $x^{(t)}$ to misreport ${\bf q}^{(t)}$ is:
+
+ | 
+ | $\small\mathbb{E}[S_{CE}({\bf q}^{(t)})|x^{(t)},x^{(s)}]-\mathbb{E}[S_{CE}({\bf p}^{(t)})|x^{(t)},x^{(s)}]\leq\mathcal{D}_{\eta}(\Delta,{\bf y})$ 
+ | 
+ | (41)
+
+where ${\bf y}$ is the prior and
+
+ | 
+ | $\small\mathcal{D}_{\eta}(\Delta,{\bf y})=\Delta\cdot\log\left(\frac{({1-\eta})y_{1}+\Delta\cdot\left(\eta y_{0}+({1-\eta}){y_{1}}\right)}{\eta y_{0}-\Delta\cdot\left(\eta y_{0}+({1-\eta}){y_{1}}\right)}\right)$ 
+ | 
+ | (42)
+
+where $\Delta$ is as defined in Lemma 1.
+
+###### Proof.
+
+By Corollary 1, we have that the expected reward for truth-telling is the negative entropy of the true posterior: $\mathbb{E}[S_{CE}({\bf p}^{(t)})|\hat{X}^{(t)}]=H\left(\mathbb{E}\left[{\bf p}^{(r)}\left.\right|\hat{X}^{(t)}\right],{\bf p}^{(t)}\right)=-H\left({\bf p}^{(t)}\right)$ . Additionally, we can write:
+
+ | 
+ | $\displaystyle\small\mathbb{E}[S_{CE}({\bf q}^{(t)})|\hat{X}^{(t)}]$ 
+ | $\displaystyle=-H\left(\mathbb{E}\left[\tilde{\bf p}^{(r)}\left.\right|\hat{X}^{(t)}\right],{\bf q}^{(t)}\right)$ 
+ | 
+
+ | 
+ | 
+ | $\displaystyle\leq-H\left(\mathbb{E}\left[\tilde{\bf p}^{(r)}\left.\right|\hat{X}^{(t)}\right]\right)$ 
+ | 
+
+ | 
+ | 
+ | $\displaystyle\leq-H\left({\bf p}^{(t)}\right)+\nabla\left(-H\left(\mathbb{E}\left[\tilde{\bf p}^{(r)}\left.\right|\hat{X}^{(t)}\right]\right)\right)^{T}\left(\mathbb{E}\left[\tilde{\bf p}^{(r)}\left.\right|\hat{X}^{(t)}\right]-{\bf p}^{(t)}\right)$ 
+ | 
+ | (by concavity of entropy))
+
+ | 
+ | 
+ | $\displaystyle=-H\left({\bf p}^{(t)}\right)+\Delta\cdot\log\left(\frac{{p}_{1}^{(t)}+\Delta}{1-{p}_{1}^{(t)}-\Delta}\right)$ 
+ | 
+ | (43)
+
+We can further simplify the term $\Delta\cdot\log\left(\frac{{p}_{1}^{(t)}+\Delta}{1-{p}_{1}^{(t)}-\Delta}\right)$ as follows:
+
+ | 
+ | $\small\begin{split}\Delta\cdot\log\left(\frac{{p}_{1}^{(t)}+\Delta}{1-{p}_{1}^{(t)}-\Delta}\right)&=\Delta\cdot\log\left(\frac{\mathbb{P}(Y=1|x^{(t)},x^{(s)})+\Delta}{\mathbb{P}(Y=0|x^{(t)},x^{(s)})-\Delta}\right)\\
+&=\Delta\cdot\log\left(\frac{\frac{\mathbb{P}(x^{(t)}|Y=1)\mathbb{P}(Y=1|x^{(s)})}{\mathbb{P}(x^{(t)}|x^{(s)})}+\Delta}{\frac{\mathbb{P}(x^{(t)}|Y=0)\mathbb{P}(Y=0|x^{(s)})}{\mathbb{P}(x^{(t)}|x^{(s)})}-\Delta}\right)\\
+&=\Delta\cdot\log\left(\frac{\frac{\mathbb{P}(x^{(t)}|Y=1)\mathbb{P}(Y=1|x^{(s)})}{\mathbb{P}(x^{(t)}|Y=0)\mathbb{P}(Y=0|x^{(s)})}+\Delta\cdot\frac{\mathbb{P}(x^{(t)}|x^{(s)})}{\mathbb{P}(x^{(t)}|Y=0)\mathbb{P}(Y=0|x^{(s)})}}{1-\Delta\cdot\frac{\mathbb{P}(x^{(t)}|x^{(s)})}{\mathbb{P}(x^{(t)}|Y=0)\mathbb{P}(Y=0|x^{(s)})}}\right)\\
+&=\Delta\cdot\log\left(\frac{\frac{\mathbb{P}(x^{(t)}|Y=1)\mathbb{P}(Y=1|x^{(s)})}{\mathbb{P}(x^{(t)}|Y=0)\mathbb{P}(Y=0|x^{(s)})}+\Delta\cdot\left(1+\frac{\mathbb{P}(x^{(t)}|Y=1)\mathbb{P}(Y=1|x^{(s)})}{\mathbb{P}(x^{(t)}|Y=0)\mathbb{P}(Y=0|x^{(s)})}\right)}{1-\Delta\cdot\left(1+\frac{\mathbb{P}(x^{(t)}|Y=1)\mathbb{P}(Y=1|x^{(s)})}{\mathbb{P}(x^{(t)}|Y=0)\mathbb{P}(Y=0|x^{(s)})}\right)}\right)\\
+&\leq\Delta\cdot\log\left(\frac{\frac{1-\eta}{\eta}\cdot\frac{y_{1}}{y_{0}}+\Delta\cdot\left(1+\frac{1-\eta}{\eta}\cdot\frac{y_{1}}{y_{0}}\right)}{1-\Delta\cdot\left(1+\frac{1-\eta}{\eta}\cdot\frac{y_{1}}{y_{0}}\right)}\right)\\
+&=\Delta\cdot\log\left(\frac{({1-\eta})y_{1}+\Delta\cdot\left(\eta y_{0}+({1-\eta}){y_{1}}\right)}{\eta y_{0}-\Delta\cdot\left(\eta y_{0}+({1-\eta}){y_{1}}\right)}\right)\end{split}$ 
+ | 
+ | (44)
+
+Thus, the difference in expected rewards when deviating from truthtelling is:
+
+ | 
+ | $\displaystyle\small\mathbb{E}[S_{CE}({\bf q}^{(t)})|\hat{X}^{(t)}]-\mathbb{E}[S_{CE}({\bf p}^{(t)})|\hat{X}^{(t)}]\leq\Delta\cdot\log\left(\frac{({1-\eta})y_{1}+\Delta\cdot\left(\eta y_{0}+({1-\eta}){y_{1}}\right)}{\eta y_{0}-\Delta\cdot\left(\eta y_{0}+({1-\eta}){y_{1}}\right)}\right)$ 
+ | 
+ | (45)
+
+∎
+
+#### Theorem 4.
+
+Suppose agent $t$ is paid based on a cross-entropy market scoring rule with respect to agent $r$ who reports truthfully. Then, agent $t$ strictly maximizes their expected payoff by reporting truthfully if the reference agent has at least $k$ signals where
+
+ | 
+ | $\small k\geq\frac{1}{-\log\left(1-\delta\right)}\log\left(\frac{\left|\log\left(\frac{1-\eta}{\eta}\right)\right|\left({{\frac{1-\eta}{\eta}}}-{{\frac{\eta}{1-\eta}}}\right)}{8\left(\tau\eta(1-\eta)\right)^{2}}\right)$ 
+ | 
+ | (46)
+
+###### Proof.
+
+We proceed similar to our proof of Theorem 2:
+
+In order for truthful reporting to pay more than any strategic misreport, we consider the difference in expected scores when reporting the truth ${\bf p}^{(t)}$ relative to reporting some other potentially better report ${\bf q}^{(t)}$ (that is consistent with signal $\tilde{x}^{(t)}$ :
+
+ | 
+ | $\begin{split}\mathbb{E}[S_{CEM}({\bf q}^{(t)})|\hat{X}^{(t)}]-\mathbb{E}[S_{CEM}({\bf p}^{(t)})|\hat{X}^{(t)}]&=-H\left(\mathbb{E}\left[\tilde{\bf p}^{(r)}\left.\right|\hat{X}^{(t)}\right],{\bf q}^{(t)}\right)+H\left(\mathbb{E}\left[\tilde{\bf p}^{(r)}\left.\right|\hat{X}^{(t)}\right],{\bf y}^{(t-1)}\right)\\
+&\phantom{=}+H\left({\bf p}^{(t)}\right)-H\left({\bf p}^{(t)},{\bf y}^{(t-1)}\right)\\
+&=\Delta\log\left(\frac{q_{1}^{(t)}}{1-q_{1}^{(t)}}\right)-\text{KL}({\bf p}^{(t)}\|{\bf q}^{(t)})+\Delta\log\left(\frac{1-y_{1}^{(t-1)}}{y_{1}^{(t-1)}}\right)\\
+&=\Delta\log\left(\frac{q_{1}^{(t)}}{1-q_{1}^{(t)}}\cdot\frac{1-y_{1}^{(t-1)}}{y_{1}^{(t-1)}}\right)-\text{KL}({\bf p}^{(t)}\|{\bf q}^{(t)})\\
+&=\Delta\left(\lambda_{q}-\lambda_{y^{(t-1)}}\right)-\text{KL}({\bf p}^{(t)}\|{\bf q}^{(t)})\\
+&=\Delta\lambda_{\tilde{x}}-\text{KL}({\bf p}^{(t)}\|{\bf q}^{(t)})\end{split}$ 
+ | 
+ | (47)
+
+since $\lambda_{q}=\lambda_{\tilde{x}}+\lambda_{y^{(t-1)}}$ with $\lambda_{\tilde{x}}=\log\left(\frac{\mathbb{P}(\tilde{x}^{(t)}|Y=1)}{\mathbb{P}(\tilde{x}^{(t)}|Y=0)}\right)$ . Thus, truthful reporting yields higher utility over reporting ${\bf q}^{(t)}$ when:
+
+ | 
+ | $\Delta\lambda_{\tilde{x}}-\text{KL}({\bf p}^{(t)}\|{\bf q}^{(t)})
+ | 
+ | (48)
+
+As discussed in the proof of Theorem 2, truthful reporting yields higher utility over reporting ${\bf q}^{(t)}$ when:
+
+ | 
+ | $\small|\Delta|
+ | 
+ | (49)
+
+Since $\left|\lambda_{\tilde{x}}\right|\leq\left|\log\left(\frac{1-\eta}{\eta}\right)\right|$ , we can write:
+
+ | 
+ | $\small\frac{\text{KL}({\bf p}^{(t)}\|{\bf q}^{(t)})}{|\lambda_{\tilde{x}}|}\geq\frac{2\left(\eta(1-\eta)\tau\right)^{2}}{\left|\log\left(\frac{1-\eta}{\eta}\right)\right|}$ 
+ | 
+ | (50)
+
+This gives us an upper bound for $\Delta$ that will ensure strict truthfulness:
+
+ | 
+ | $\small\begin{split}|\Delta|\leq\frac{2\left(\eta(1-\eta)\tau\right)^{2}}{\left|\log\left(\frac{1-\eta}{\eta}\right)\right|}\end{split}$ 
+ | 
+ | (51)
+
+This lets us identify the needed $k$ :
+
+ | 
+ | $\small\begin{split}k&\geq\frac{1}{-\log\left(1-\delta\right)}\log\left(\frac{\left|\log\left(\frac{1-\eta}{\eta}\right)\right|\left({{\frac{1-\eta}{\eta}}}-{{\frac{\eta}{1-\eta}}}\right)}{8\left(\eta(1-\eta)\tau\right)^{2}}\right)\end{split}$ 
+ | 
+ | (52)
+
+∎
+
+#### Theorem 9.
+
+If agent $t$ is paid based on a cross-entropy market scoring rule with respect to agent $r$ who reports truthfully, the difference in expected payoff when deviating from truthful report ${\bf p}^{(t)}$ associated with signal $x^{(t)}$ to misreport ${\bf q}^{(t)}$ is:
+
+ | 
+ | $\small\mathbb{E}[S_{CEM}({\bf q}^{(t)})|x^{(t)},x^{(1:t-1)}]-\mathbb{E}[S_{CEM}({\bf p}^{(t)})|x^{(t)},x^{(1:t-1)}]\leq\hat{\mathcal{D}}_{\eta}(\Delta,{\bf y}^{(t-1)})$ 
+ | 
+ | (53)
+
+where ${\bf y}^{(t-1)}$ is the true market prior before agent $t$ ’s report and
+
+ | 
+ | $\small\hat{\mathcal{D}}_{\eta}(\Delta,{\bf y}^{(t-1)})=\Delta\cdot\log\left(\frac{({1-\eta})+\Delta\cdot\left(\eta\frac{y_{0}^{(t-1)}}{y_{1}^{(t-1)}}+({1-\eta})\right)}{\eta-\Delta\cdot\left(\eta+({1-\eta})\frac{y_{1}^{(t-1)}}{y_{0}^{(t-1)}}\right)}\right)$ 
+ | 
+ | (54)
+
+###### Proof.
+
+Using Corollary 1, we see that when agent $t$ tells the truth, their payoff is the KL divergence of the true posterior from the previous report ${\bf y}^{(t-1)}$ :
+
+ | 
+ | $\small\begin{split}\mathbb{E}[S_{CEM}({\bf p}^{(t)})|\hat{X}^{(t)}]&=-H\left(\mathbb{E}\left[{\bf p}^{(r)}\left.\right|\hat{X}^{(t)}\right],{\bf p}^{(t)}\right)+H\left(\mathbb{E}\left[{\bf p}^{(r)}\left.\right|\hat{X}^{(t)}\right],{\bf y}^{(t-1)}\right)\\
+&=-H\left({\bf p}^{(t)}\right)+H\left({\bf p}^{(t)},{\bf y}^{(t-1)}\right)\\
+&=\text{KL}\left({\bf p}^{(t)}\,\,||\,\,{\bf y}^{(t-1)}\right)\end{split}$ 
+ | 
+ | (55)
+
+Meanwhile, we can write agent $t$ ’s expected reward from misreporting as:
+
+ | 
+ | $\displaystyle\small\mathbb{E}[S_{CEM}({\bf q}^{(t)})|\hat{X}^{(t)}]$ 
+ | $\displaystyle=-H\left(\mathbb{E}\left[\tilde{\bf p}^{(r)}\left.\right|\hat{X}^{(t)}\right],{\bf q}^{(t)}\right)+H\left(\mathbb{E}\left[\tilde{\bf p}^{(r)}\left.\right|\hat{X}^{(t)}\right],{\bf y}^{(t-1)}\right)$ 
+ | 
+
+ | 
+ | 
+ | $\displaystyle\leq-H\left(\mathbb{E}\left[\tilde{\bf p}^{(r)}\left.\right|\hat{X}^{(t)}\right]\right)+H\left(\mathbb{E}\left[\tilde{\bf p}^{(r)}\left.\right|\hat{X}^{(t)}\right],{\bf y}^{(t-1)}\right)$ 
+ | 
+
+ | 
+ | 
+ | $\displaystyle=\text{KL}\left(\mathbb{E}\left[\tilde{\bf p}^{(r)}\left.\right|\hat{X}^{(t)}\right]\,\,||\,\,{\bf y}^{(t-1)}\right)$ 
+ | 
+ | (56)
+
+ | 
+ | 
+ | $\displaystyle\leq\text{KL}\left({\bf p}^{(t)}\,\,||\,\,{\bf y}^{(t-1)}\right)+\nabla\left(\text{KL}\left(\mathbb{E}\left[\tilde{\bf p}^{(r)}\left.\right|\hat{X}^{(t)}\right]\right)\,\,||\,\,{\bf y}^{(t-1)}\right)^{T}\left(\mathbb{E}\left[\tilde{\bf p}^{(r)}\left.\right|\hat{X}^{(t)}\right]-{\bf p}^{(t)}\right)$ 
+ | 
+ | (by convexity of KL divergence in the first argument))
+
+ | 
+ | 
+ | $\displaystyle=\text{KL}\left({\bf p}^{(t)}\,\,||\,\,{\bf y}^{(t-1)}\right)+\Delta\cdot\log\left(\frac{({p}_{1}^{(t)}+\Delta)(1-y_{1}^{(t-1)})}{(1-{p}_{1}^{(t)}-\Delta)y_{1}^{(t-1)}}\right)$ 
+ | 
+ | (57)
+
+This expression is very similar to Equation 43, except the log term has an additional factor depending on the previous market price as well. Under the assumption that previous agents reported truthfully, we can further simplify this expression:
+
+ | 
+ | $\small\begin{split}\Delta\cdot\log\left(\frac{({p}_{1}^{(t)}+\Delta)y_{0}^{(t-1)}}{({p}_{0}^{(t)}-\Delta)y_{1}^{(t-1)}}\right)&=\Delta\cdot\log\left(\frac{\left(\frac{\mathbb{P}(x^{(t)}|Y=1)\mathbb{P}(Y=1|x^{(s)})}{\mathbb{P}(x^{(t)}|x^{(s)})}+\Delta\right)\mathbb{P}(Y=0|x^{(s)})}{\left(\frac{\mathbb{P}(x^{(t)}|Y=0)\mathbb{P}(Y=0|x^{(s)})}{\mathbb{P}(x^{(t)}|x^{(s)})}-\Delta\right)\mathbb{P}(Y=1|x^{(s)})}\right)\\
+&=\Delta\cdot\log\left(\frac{\mathbb{P}(x^{(t)}|Y=1)+\Delta\cdot\frac{\mathbb{P}(x^{(t)}|x^{(s)})}{\mathbb{P}(Y=1|x^{(s)})}}{\mathbb{P}(x^{(t)}|Y=0)-\Delta\cdot\frac{\mathbb{P}(x^{(t)}|x^{(s)})}{\mathbb{P}(Y=0|x^{(s)})}}\right)\\
+&=\Delta\cdot\log\left(\frac{\frac{\mathbb{P}(x^{(t)}|Y=1)}{\mathbb{P}(x^{(t)}|Y=0)}+\Delta\cdot\frac{\mathbb{P}(x^{(t)}|Y=0)\mathbb{P}(Y=0|x^{(s)})+\mathbb{P}(x^{(t)}|Y=1)\mathbb{P}(Y=1|x^{(s)})}{\mathbb{P}(x^{(t)}|Y=0)\mathbb{P}(Y=1|x^{(s)})}}{1-\Delta\cdot\frac{\mathbb{P}(x^{(t)}|Y=0)\mathbb{P}(Y=0|x^{(s)})+\mathbb{P}(x^{(t)}|Y=1)\mathbb{P}(Y=1|x^{(s)})}{\mathbb{P}(x^{(t)}|Y=0)\mathbb{P}(Y=0|x^{(s)})}}\right)\\
+&=\Delta\cdot\log\left(\frac{\frac{\mathbb{P}(x^{(t)}|Y=1)}{\mathbb{P}(x^{(t)}|Y=0)}+\Delta\cdot\left(\frac{\mathbb{P}(Y=0|x^{(s)})}{\mathbb{P}(Y=1|x^{(s)})}+\frac{\mathbb{P}(x^{(t)}|Y=1)}{\mathbb{P}(x^{(t)}|Y=0)}\right)}{1-\Delta\cdot\left(1+\frac{\mathbb{P}(x^{(t)}|Y=1)\mathbb{P}(Y=1|x^{(s)})}{\mathbb{P}(x^{(t)}|Y=0)\mathbb{P}(Y=0|x^{(s)})}\right)}\right)\\
+&\leq\Delta\cdot\log\left(\frac{\frac{1-\eta}{\eta}+\Delta\cdot\left(\frac{y_{0}^{(t-1)}}{y_{1}^{(t-1)}}+\frac{1-\eta}{\eta}\right)}{1-\Delta\cdot\left(1+\frac{1-\eta}{\eta}\cdot\frac{y_{1}^{(t-1)}}{y_{0}^{(t-1)}}\right)}\right)\\
+&=\Delta\cdot\log\left(\frac{({1-\eta})+\Delta\cdot\left(\eta\frac{y_{0}^{(t-1)}}{y_{1}^{(t-1)}}+({1-\eta})\right)}{\eta-\Delta\cdot\left(\eta+({1-\eta})\frac{y_{1}^{(t-1)}}{y_{0}^{(t-1)}}\right)}\right)\end{split}$ 
+ | 
+ | (58)
+
+Thus, the difference in expected rewards when deviating from truthtelling is:
+
+ | 
+ | $\small\mathbb{E}[S_{CEM}({\bf q}^{(t)})|\hat{X}^{(t)}]-\mathbb{E}[S_{CEM}({\bf p}^{(t)})|\hat{X}^{(t)}]\leq\Delta\cdot\log\left(\frac{({1-\eta})+\Delta\cdot\left(\eta\frac{y_{0}^{(t-1)}}{y_{1}^{(t-1)}}+({1-\eta})\right)}{\eta-\Delta\cdot\left(\eta+({1-\eta})\frac{y_{1}^{(t-1)}}{y_{0}^{(t-1)}}\right)}\right)$ 
+ | 
+ | (59)
+
+∎
+
+#### Theorem 6
+
+In a self-resolving prediction market where a reference agent can observe at least $k$ additional predictions (with $k$ chosen according to Theorem 4), the strategy profile of truthful reporting and belief profile of believing all previous agents reported truthfully is a strict Perfect Bayesian Equilibrium. When $k$ is chosen according to Remark 3, this strategy and belief profile is a $\varepsilon-$ PBE. Off the equilibrium path, agents believe any observed (mis)report to be truthful if that report is consistent with the reporting agent’s signal structure. If the observed prediction is invalid, (i.e., inconsistent with any signal the reporting agent could have observed), all subsequent agents may either update as if they learned some arbitrary signal or ignore this prediction, and believe all subsequent agents continue to report truthfully. 
+
+###### Proof.
+
+Consider the strategy profile where all agents in the market report their beliefs truthfully and believe all other agents report their beliefs truthfully. From agent $t$ ’s perspective, in any supposed truthful equilibrium, they believe all previous reports to be truthful, and know that any valid report they make will be believed and any invalid report they make can induce an update consistent with an arbitrary signal in subsequent agent’s beliefs. However, the reference agent can observe at least $k$ other truthful (in equilibrium) predictions that agent $t$ cannot.
+
+Suppose $k$ is chosen as in Remark 3. Then, Theorem 1 guarantees that agent $t$ ’s expectation of their reference agent’s beliefs is no more than $\varepsilon^{\prime}$ away from their own true beliefs. Further, by Theorem 9, agent $t$ ’s maximum possible gain in deviating from truthful reporting is upper bounded, i.e., $\hat{\mathcal{D}}_{\eta}(\Delta,{\bf p}^{(t-1)})\leq\varepsilon$ . Thus, truthful reporting is an $\varepsilon-$ PBE.
+
+If instead $k$ is chosen as in Theorem 4, agent $t$ strictly maximizes their payoff by reporting truthfully; thus, truthful reporting is a strict PBE.
+
+∎
+
+◄
+ 
+ Feelinglucky?
+ 
+ Conversionreport
+ Reportan issue
+ View originalon arXiv►
+
+Copyright
+Privacy Policy
+
+Generated by LaTeXML oxide
+

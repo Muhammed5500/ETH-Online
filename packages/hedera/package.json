@@ -1,0 +1,19 @@
+{
+  "name": "@ethonline/hedera",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Hedera SDK sarmalayici: HCS defteri, rastgelelik, treasury, x402",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@ethonline/core": "workspace:*",
+    "@hashgraph/sdk": "^2.81.0"
+  }
+}

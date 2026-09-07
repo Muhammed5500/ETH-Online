@@ -1,0 +1,10 @@
+{
+  "name": "@ethonline/web",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Frontend \u2014 Next.js kurulumu ADIM 27'de yapilacak",
+  "scripts": {
+    "build": "echo 'web: ADIM 27de kurulacak' && exit 0"
+  }
+}
