@@ -18,3 +18,4 @@ deployments/*.local.json
 
 .DS_Store
 Thumbs.db
+spikes/*/receiver.json

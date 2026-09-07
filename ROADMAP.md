@@ -1464,6 +1464,53 @@ GET  /agents                kayıtlı agent listesi
 POST /agents/register       agent kaydı (HERKESE AÇIK)
 ```
 
+**SPIKE A'DA DOĞRULANMIŞ GERÇEKLER — tahmin etme, bunları kullan:**
+
+```ts
+// SERVER
+import { paymentMiddlewareFromConfig } from '@x402/express';
+import { HTTPFacilitatorClient } from '@x402/core/server';
+import { ExactHederaScheme } from '@x402/hedera/exact/server';
+import { HBAR_ASSET_ID, HEDERA_TESTNET_CAIP2 } from '@x402/hedera';
+
+const facilitator = new HTTPFacilitatorClient({ url: 'https://api.testnet.blocky402.com' });
+const routes = {
+  'POST /market': {
+    accepts: { scheme: 'exact', network: HEDERA_TESTNET_CAIP2, payTo: TREASURY_ID,
+               price: { asset: HBAR_ASSET_ID, amount: '<tinybar>' } },
+  },
+};
+app.use(paymentMiddlewareFromConfig(routes, facilitator,
+  [{ network: HEDERA_TESTNET_CAIP2, server: new ExactHederaScheme() }]));
+
+// CLIENT
+import { wrapFetchWithPayment, x402Client, decodePaymentResponseHeader } from '@x402/fetch';
+import { createClientHederaSigner, ExactHederaScheme, PrivateKey } from '@x402/hedera';
+
+const signer = createClientHederaSigner(accountId, PrivateKey.fromStringECDSA(key),
+                                        { network: HEDERA_TESTNET_CAIP2 });
+const client = x402Client.fromConfig({
+  schemes: [{ network: HEDERA_TESTNET_CAIP2, client: new ExactHederaScheme(signer) }],
+  spendControls: { allowedAssets: [{ network: HEDERA_TESTNET_CAIP2, asset: HBAR_ASSET_ID,
+                                     maxAmountPerPayment: '10000000' }] },
+});
+const res = await wrapFetchWithPayment(fetch, client)(url);
+const settlement = decodePaymentResponseHeader(res.headers.get('payment-response')!);
+```
+
+**Üç tuzak (SPIKE A'da her biri zaman yedi):**
+
+1. **Settlement header'ının adı `payment-response`**, `x-payment-response` DEĞİL.
+   Yanlış isim kullanırsan header boş döner ve ödeme başarısız sanırsın — oysa ödeme
+   başarılıdır.
+2. **Harcama kontrolleri HBAR'ı varsayılan olarak reddediyor.** `spendControls` içinde
+   `allowedAssets` ile açıkça izin ver. `false` ile kapatma — bu özellik ADIM 20'de
+   agent'ların harcamasını sınırlamak için işine yarayacak.
+3. **`pnpm --filter X <script>` pnpm'in yerleşik komutlarıyla çakışıyor.** Her zaman
+   `pnpm --filter X run <script>` kullan.
+
+**Paket sürümleri:** `@x402/*` **2.25.0**. `x402` / `x402-express` v1.2.0 eski hat, kullanma.
+
 **Teknik gereksinimler:**
 - x402 middleware'ini Blocky402 quickstart'a göre kur (ADIM 2'de doğrulanmıştı)
 - Ödeme doğrulandıktan sonra iş mantığı çalışsın, önce değil

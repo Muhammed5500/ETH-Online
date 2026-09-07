@@ -1,0 +1,25 @@
+{
+  "name": "@ethonline/spike-hedera-x402",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "ADIM 2 SPIKE A — Hedera testnet uzerinde x402 ile ucretlendirilmis endpoint",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "server": "tsx src/server.ts",
+    "client": "tsx src/client.ts",
+    "setup": "tsx src/setup.ts"
+  },
+  "dependencies": {
+    "@hashgraph/sdk": "^2.81.0",
+    "@x402/core": "^2.25.0",
+    "@x402/express": "^2.25.0",
+    "@x402/fetch": "^2.25.0",
+    "@x402/hedera": "^2.25.0",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6"
+  }
+}

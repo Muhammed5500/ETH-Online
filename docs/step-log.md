@@ -118,3 +118,90 @@ Kalan artık: `0.0.10409150` (testnet, önemsiz).
   kurulunca (ADIM 27) daha da yavaşlarsa klasörü senkron dışı bırakmak gerekecek.
 - pnpm `protobufjs` build scriptlerini atladı (`esbuild` gibi). SDK sorunsuz çalıştı,
   şimdilik aksiyon gerekmiyor.
+
+---
+
+## ADIM 2 — SPIKE A: Hedera x402 Hello World
+
+- **Tarih:** 2026-09-07
+- **Durum:** YESIL
+- **Komutlar:** `pnpm --filter @ethonline/spike-hedera-x402 run setup | run server | run client`
+
+### Sonuc
+
+Hedera testnet uzerinde x402 ile ucretlendirilmis endpoint **ucdan uca calisiyor.**
+Odemesiz istek 402, odemeli istek 200, ve para gercekten zincirde tasiniyor.
+
+Alici hesap `0.0.10409325`: 1 HBAR -> 1.005 HBAR. Bes odeme, hepsi mirror node'da
+SUCCESS. Her biri 100.000 tinybar (0.001 HBAR).
+
+Ornek settlement yaniti:
+```json
+{"success":true,"payer":"0.0.10407814",
+ "transaction":"0.0.7162784@1788800025.853649623","network":"hedera:testnet"}
+```
+
+Islem kimligindeki `0.0.7162784` **facilitator'un fee payer hesabi**, bizim degil.
+Yani gas'i facilitator odeyip islemi o gonderiyor; biz sadece kismi imzali transferi
+uretiyoruz. ADIM 16'daki maliyet hesabinda bu onemli.
+
+### Dogrulanan teknik gercekler (ADIM 15 ve 16 bunlara dayanacak)
+
+| Konu | Deger |
+|---|---|
+| Paket hatti | `@x402/core`, `@x402/hedera`, `@x402/express`, `@x402/fetch` — **2.25.0** |
+| Kullanilmayacak | `x402` / `x402-express` v1.2.0 (eski Coinbase hatti, Solana+CDP bagimli) |
+| Facilitator | `https://api.testnet.blocky402.com` |
+| CAIP-2 ag | `hedera:testnet` |
+| HBAR asset id | `0.0.0`, miktarlar tinybar |
+| Testnet USDC | `0.0.429274`, 6 ondalik |
+| Server API | `paymentMiddlewareFromConfig(routes, HTTPFacilitatorClient, [{network, server}])` |
+| Server semasi | `ExactHederaScheme` from `@x402/hedera/exact/server` |
+| Client API | `x402Client.fromConfig({schemes, spendControls})` + `wrapFetchWithPayment` |
+| Client semasi | `ExactHederaScheme` from `@x402/hedera` (kok export = client) |
+| Imzalayici | `createClientHederaSigner(accountId, PrivateKey, {network})` |
+
+### Uc tuzak (hepsi zaman yedi, ADIM 15'te tekrar etmesin)
+
+**1. Settlement header'inin adi `payment-response`, `x-payment-response` DEGIL.**
+Once yanlis ismi tahmin ettim, header bos dondu ve odeme basarisiz sanildi. Oysa odeme
+basariliydi. Uc ardisik kosuda teshis ettim: `x-payment-response=yok`,
+`payment-response=VAR`. Kod tabaninda iki isim de geciyor ama v2 akisinda gelen
+`payment-response`. Cozmek icin `decodePaymentResponseHeader(header)` kullaniliyor.
+
+**2. Client'in harcama kontrolleri HBAR'i varsayilan olarak REDDEDIYOR.**
+Hata: `All payment requirements were rejected by spendControls: only default assets
+or entries in spendControls.allowedAssets are allowed.` Varsayilan yalnizca "default
+asset"lere (USDC gibi) izin veriyor, HBAR default degil.
+
+Bunu `spendControls: false` ile kapatmak yerine **acikca izin listesine ekledik ve
+tavan koyduk**:
+```ts
+spendControls: {
+  allowedAssets: [{ network: 'hedera:testnet', asset: '0.0.0',
+                    maxAmountPerPayment: '10000000' }],  // 0.1 HBAR tavan
+}
+```
+Bu bir engel degil, ise yarayacak bir ozellik: ADIM 20'de agent'lar veri sorgusu icin
+otonom odeme yapacak ve sinirsiz harcama yetkisi vermek istemiyoruz.
+
+**3. dotenv calisma dizininden .env ariyor.**
+`pnpm --filter X run Y` calistirinca cwd o paketin klasoru oluyor, kok `.env`
+bulunamiyor ve degiskenler `undefined` geliyor. Hata mesaji bunu soylemiyor, sadece
+`Cannot read properties of undefined` diyor.
+
+Cozum `spikes/hedera-x402/src/env.ts`: yolu acikca veriyor ve eksik degiskende net
+hata basiyor. **ADIM 6'da bu paylasilan bir config paketine tasinacak**, cunku ayni
+sorun apps/api, apps/agent ve scripts tarafinda da cikacak.
+
+### Iki kucuk not
+
+- `pnpm --filter X <script>` bazi script adlarinda pnpm'in yerlesik komutlariyla
+  cakisiyor (`setup`, `server` denendi, ikisi de `Unknown option: 'recursive'` verdi).
+  **Her zaman `run` ile cagir:** `pnpm --filter X run <script>`.
+- `.env`'de `KEY=` yazinca deger bos string olur, `undefined` degil. `??` bunu
+  yakalamaz, `||` yakalar. Facilitator URL'i bu yuzden bos gitmisti.
+
+### Kalan artik
+
+Testnet hesaplari: alici `0.0.10409325`. `receiver.json` gitignore'da.
