@@ -68,3 +68,43 @@ export class ScriptedRandom {
     return this.i;
   }
 }
+
+/**
+ * Etikete göre değer döndürür — sıraya değil.
+ *
+ * `ScriptedRandom` diziye dayandığı için tüketim sırası değişince hizası kayıyor.
+ * Örnek: timeout bir `draw` tüketip `stop` tüketmiyor, dolayısıyla sonraki
+ * çağrı dizide bir kayıyor ve testin niyeti bozuluyor.
+ *
+ * Bu kaynak `draw-*` ve `stop-*` etiketlerine ayrı sabitler döndürerek niyeti
+ * doğrudan ifade ediyor: "hiç kapanmasın", "ilk agent'ı çek" gibi.
+ */
+export class LabelledRandom {
+  readonly log: Array<{ label: string; value: number }> = [];
+
+  /**
+   * @param rules Etiket ön eki -> değer. En uzun eşleşen ön ek kazanır.
+   * @param fallback Hiçbir kural eşleşmezse dönecek değer.
+   */
+  constructor(
+    private readonly rules: Readonly<Record<string, number>>,
+    private readonly fallback = 0.5,
+  ) {}
+
+  next(label: string): number {
+    let best: string | undefined;
+    for (const prefix of Object.keys(this.rules)) {
+      if (label.startsWith(prefix) && (best === undefined || prefix.length > best.length)) {
+        best = prefix;
+      }
+    }
+    const value = best === undefined ? this.fallback : this.rules[best]!;
+    this.log.push({ label, value });
+    return value;
+  }
+
+  /** Belirli bir ön ekle kaç kez çağrıldı. */
+  countOf(prefix: string): number {
+    return this.log.filter((e) => e.label.startsWith(prefix)).length;
+  }
+}

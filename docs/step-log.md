@@ -343,3 +343,58 @@ kayan nokta hatasi birikirdi.
 `1 - 0.99 = 0.010000000000000009` oldugu icin kaldi. Kod dogru, test fazla
 katiydi. `toBeCloseTo`'ya cevirdim ve ayrica **toplamin birebir 1 oldugunu**
 dogrulayan yeni bir test ekledim — asil onemli olan ozellik o.
+
+---
+
+## ADIM 8 — Market State Machine
+
+- **Tarih:** 2026-09-08
+- **Durum:** GECTI
+- **Test:** 23 market + 5 helper testi yazildi
+- **Tam suite:** 72/72 yesil, build temiz
+
+### Yazilanlar
+
+`packages/core/src/market.ts` — `Market` sinifi, `createMarketState`.
+`packages/core/test/helpers.ts` — yeni `LabelledRandom` kaynagi.
+
+Akis: `bonding -> running -> closed`, veya `bonding -> cancelled`.
+
+### Zorlanan dort kural
+
+1. **Bir agent en fazla bir kez katilir.** Iki savunma hatti: `addBondedAgent`
+   ayni id'yi reddediyor, `drawNextAgent` cekileni havuzdan siliyor.
+2. **Sira onceden hesaplanmiyor.** Her turda `rng.next('draw-N')` ile tek agent.
+3. **Timeout durma zarini ATLIYOR.** `ScriptedRandom.consumed` ile dogrulandi.
+4. **Referans her zaman terminal agent.**
+
+### Uc test kirmizi yandi, ucu de test kurgusu hatasiydi
+
+**(a) Kucuk havuz + varsayilan k.** `minPoolSize: 3` verirken `k=3` birakmisim;
+validator `minPoolSize > k+1` kuralini haklı olarak uygulayip reddetti.
+Duzeltme: `SMALL_POOL = { k:1, T:1, alpha:0.5 }`.
+
+**(b) ScriptedRandom hizasi kaydi — asil ogretici olan bu.** Timeout bir `draw`
+tuketip `stop` tuketmiyor, dolayisiyla `[DRAW, NO_STOP, ...]` dizisi timeout'tan
+sonra bir kayiyor ve `stop` beklenen yerde `DRAW=0` okunuyor. 0 < alpha oldugu
+icin market beklenmedik sekilde kapaniyor. Test yesil kalsaydi bambaska bir seyi
+olcuyor olacakti.
+
+Cozum diziyi duzeltmek degil, daha saglam yardimci yazmak oldu: **LabelledRandom**
+siraya degil **etikete** gore deger donduruyor (`draw-*`, `stop-*`, en uzun
+eslesen on ek kazanir). Cagri sirasi degisince bozulmuyor. `ScriptedRandom` tek
+bir yerde kaldi: tuketim sayimi gereken timeout testi.
+
+### Build kapisi ise yaradi
+
+Testler yesilken **build kirmiziydi**: `runningMarket` imzasi
+`ScriptedRandom | SeededRandom` idi, `LabelledRandom` kabul etmiyordu. vitest
+tipleri esbuild ile soydugu icin gormuyor. Imza `RandomSource` arayuzune
+cevrildi. **Ders: `pnpm test` tek basina yeterli degil, `pnpm build` kapida
+kalmali.**
+
+### Dejenere durum notu (ADIM 9 icin)
+
+Hic rapor gelmeden herkes timeout olursa market `closed` oluyor ama
+`referenceReport` **undefined** kaliyor. Settlement bunu ele almali: skorlanacak
+kimse yok, timeout olanlarin bond'u slash edilmis, kalan her sey asker'a iade.

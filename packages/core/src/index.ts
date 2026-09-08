@@ -37,3 +37,5 @@ export {
   scoreCEM,
   totalCEM,
 } from './scoring.js';
+
+export { createMarketState, Market, type CreateMarketOptions } from './market.js';

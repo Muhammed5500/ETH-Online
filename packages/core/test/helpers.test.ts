@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ScriptedRandom, SeededRandom } from './helpers.js';
+import { LabelledRandom, ScriptedRandom, SeededRandom } from './helpers.js';
 
 describe('SeededRandom', () => {
   it('aynı seed aynı diziyi üretir', () => {
@@ -47,5 +47,42 @@ describe('ScriptedRandom', () => {
     const r = new ScriptedRandom([0.1]);
     r.next('a');
     expect(() => r.next('b')).toThrowError(/tükendi/);
+  });
+});
+
+describe('LabelledRandom', () => {
+  it('ön eke göre değer döndürüyor', () => {
+    const r = new LabelledRandom({ 'draw-': 0.1, 'stop-': 0.9 });
+    expect(r.next('draw-1')).toBe(0.1);
+    expect(r.next('stop-1')).toBe(0.9);
+    expect(r.next('draw-42')).toBe(0.1);
+  });
+
+  it('çağrı sırasından etkilenmiyor — ScriptedRandom ile asıl farkı bu', () => {
+    // Aynı etiketler farklı sırada gelse de aynı değerler dönüyor.
+    const a = new LabelledRandom({ 'draw-': 0.1, 'stop-': 0.9 });
+    const b = new LabelledRandom({ 'draw-': 0.1, 'stop-': 0.9 });
+    expect(a.next('stop-1')).toBe(b.next('stop-7'));
+    expect(a.next('draw-3')).toBe(b.next('draw-1'));
+  });
+
+  it('en uzun eşleşen ön ek kazanıyor', () => {
+    const r = new LabelledRandom({ 'stop-': 0.9, 'stop-5': 0.0 });
+    expect(r.next('stop-1')).toBe(0.9);
+    expect(r.next('stop-5')).toBe(0.0);
+  });
+
+  it('eşleşme yoksa fallback dönüyor', () => {
+    const r = new LabelledRandom({ 'draw-': 0.1 }, 0.42);
+    expect(r.next('bilinmeyen')).toBe(0.42);
+  });
+
+  it('countOf çağrıları sayıyor', () => {
+    const r = new LabelledRandom({ 'draw-': 0.1, 'stop-': 0.9 });
+    r.next('draw-1');
+    r.next('stop-1');
+    r.next('draw-2');
+    expect(r.countOf('draw-')).toBe(2);
+    expect(r.countOf('stop-')).toBe(1);
   });
 });

@@ -105,6 +105,14 @@ export interface MarketState {
   bondedAgents: string[];
   /** Çekilmiş agent'lar, çekilme sırasıyla. */
   drawnAgents: string[];
+  /**
+   * Çekilmiş ama henüz rapor vermemiş agent.
+   *
+   * Aynı anda en fazla bir agent bekleyebilir: mekanizma sıralı, ve bir sonraki
+   * agent'ın önceki tüm raporları görmesi gerekiyor (paper Varsayım 4 ve
+   * Teorem 6'nın dayandığı yapı).
+   */
+  pendingAgentId?: string;
   reports: Report[];
   /** Kapanışta terminal agent'ın raporu. Herkes buna göre skorlanır. */
   referenceReport?: Report;
