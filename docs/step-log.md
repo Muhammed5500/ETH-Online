@@ -205,3 +205,141 @@ sorun apps/api, apps/agent ve scripts tarafinda da cikacak.
 ### Kalan artik
 
 Testnet hesaplari: alici `0.0.10409325`. `receiver.json` gitignore'da.
+
+---
+
+## ADIM 3 (SPIKE B) — ERTELENDI
+
+- **Tarih:** 2026-09-08
+- **Durum:** ERTELENDI (engel degil, risk buyuk olcude kalkti)
+
+### Neden
+
+The Graph'in **testnet gateway'i deploy edilmemis.** README'de listeleniyor ama
+`testnet.gateway.thegraph.com` icin A kaydi yok (Google public DNS ile dogrulandi).
+Denenen alternatifler de olu: `sepolia.gateway.thegraph.com`,
+`gateway-testnet.thegraph.com`, `gateway-arbitrum-sepolia.thegraph.com`.
+
+Yani x402 ile sorgu = gercek para. Karar kullaniciya birakildi, o da simdilik
+atlanmasini istedi.
+
+### Ertelenmesine ragmen ogrenilenler
+
+Production gateway'e odemesiz istek atip 402'yi cozdum:
+
+```json
+{ "x402Version": 2,
+  "accepts": [{ "scheme": "exact",
+                "network": "eip155:8453",
+                "asset":   "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+                "amount":  "10000",
+                "payTo":   "0x79DC34E41B2b591078d3dE222C43EcaaBD52FcCB",
+                "extra": { "assetTransferMethod": "eip3009" } }] }
+```
+
+- Base mainnet, USDC, **$0.01 / sorgu**
+- **eip3009 = gasless.** Odeyen imza atiyor, gas'i facilitator odiyor. ETH gerekmiyor.
+- Paket: `@graphprotocol/client-x402` v1.0.0
+- API: `createGraphQuery({ endpoint, chain })` -> `await query('{ ... }')`
+- Env: `X402_PRIVATE_KEY`, `X402_CHAIN`
+
+### Onerilen plan (beklemede)
+
+Cift modlu: gelistirme ucretsiz Studio API key ile, demo/video x402 ile (~$1-2).
+Gateway client zaten iki modlu tasarlanmisti (ADIM 18), ekstra is yok.
+Gereken: Studio API key (ucretsiz) + Base aginda ~$10 USDC.
+
+### Uyari
+
+**SPIKE C (ENS, ADIM 4) cok geciktirilmemeli.** Orada gercek bilinmezlik var:
+Sepolia kontrat adresleri dokumanda yok ve "admin rolleri sadece registration
+aninda" kisiti deneyerek dogrulanmali. ENS kesilebilir parca ama kesme karari
+12. gunde verilmemeli.
+
+---
+
+## ADIM 6 — Tipler, Konfigurasyon ve Parametre Dogrulama
+
+- **Tarih:** 2026-09-08
+- **Durum:** GECTI
+- **Test:** 21 yazildi, 21 gecti
+- **Tam suite:** 27/27 yesil
+
+### Yazilanlar
+
+`packages/core/src/types.ts` — Belief, MarketParams, Report, MarketState,
+MarketStatus, ClosedReason, Payout, Settlement, RandomSource.
+
+`packages/core/src/config.ts` — DEFAULT_PARAMS (PLAN.md Bolum 4 ile birebir),
+validateParams, assertValidParams, normalizeBelief, beliefFromProbability,
+poolExhaustionProbability, flatFeeProbability, suggestedAlpha.
+
+### Tasarim kararlari
+
+**Hata ile uyari ayrildi.** Hata mekanizmayi bozar (k=0 ise referans agent kendi
+raporuna gore skorlanir), uyari ise calisan ama riskli yapilandirmadir (havuz sik
+tukeniyor). Hata firlatir, uyari doner.
+
+**`ClosedReason` ayri bir tip.** `stopping-rule` ile `pool-exhausted` ayirt
+ediliyor, cunku ikincisi mekanizmanin varsayimini ihlal ediyor ve README'de
+raporlanmasi gerekiyor.
+
+**Core tamamen saf.** Ag, dosya, ortam degiskeni erisimi yok. dotenv sorunu
+(SPIKE A'da cikan) burada cozulmedi — core'a node bagimliligi sokmamak icin ayri
+tutuldu. apps/* tarafinda ele alinacak.
+
+### Test kapisinda cikan hata
+
+`poolExhaustionProbability` testinde beklenen sabitleri elle hesaplarken hata
+yaptim: `1/6` icin 0.0293 yazmisim, dogrusu **0.031301**. `1/11` icin 0.1637
+yazmisim, dogrusu **0.163508** (4 hanede tutmuyordu).
+
+Formul dogruydu, testteki sabitler yanlisti. Testi duzelttim, kodu degil.
+PLAN.md Bolum 4.1'deki tablo (%7.9 / %10.7 / %16.4) dogru cikti — uc deger de
+kod tarafindan uretilenle birebir esiyor ve artik test ediliyor.
+
+---
+
+## ADIM 7 — CE-MSR Skorlama ve Kirpma
+
+- **Tarih:** 2026-09-08
+- **Durum:** GECTI
+- **Test:** 17 yazildi, 17 gecti
+- **Tam suite:** 44/44 yesil, build temiz
+
+### Yazilanlar
+
+`packages/core/src/scoring.ts` — clipBelief, crossEntropy, scoreCE, scoreCEM,
+kl, totalCEM, maxTotalPayout.
+
+### Kanitlanan degismezler
+
+**DEGISMEZ 1 — Teleskoplama.** Rastgele 100 rapor dizisinde adim adim toplam ile
+kapali form birebir esiyor:
+`Sum_t S_CEM(r, q^t, q^(t-1)) = S_CE(r, q^son) - S_CE(r, q^0)` (tolerans 1e-10).
+
+**DEGISMEZ 2 — Butce siniri.** Uniform prior ile toplam odeme hicbir rastgele
+markette `log 2` asmiyor (100 kosu). Ayrica uniform olmayan prior'da da
+`maxTotalPayout` gercek toplami her zaman ustten siniriliyor.
+
+**DEGISMEZ 3 onizleme — bilgisiz denge.** Herkes bir oncekini kopyalarsa ilk
+agent haric ödemeler tam sifir; ilk agent tam olarak `KL(r || q^0)` aliyor.
+Paper Teorem 7'nin skorlama seviyesindeki karsiligi. Tam senaryo testi ADIM 11'de.
+
+### Tasarim kararlari
+
+**Kirpma zorunlu ve girdide yapiliyor.** `assertScorable` sifir iceren inanci
+skorlamaya sokmuyor, hata mesajinda `clipBelief` uygulanmasi gerektigini
+soyluyor. Paper Ek C.2'deki switching equilibrium'un matematigi tam olarak
+`log(0) = -Inf`; kirpma olmadan tek agent sinirsiz skor uretebilir.
+
+**`p0 = 1 - p1` olarak turetiliyor.** Boylece toplam BIREBIR 1 oluyor. Iki
+bileseni ayri ayri kirpip normalize etmek daha "guzel" ondalik verirdi ama
+kayan nokta hatasi birikirdi.
+
+### Test kapisinda cikan hata
+
+`clipBelief([1,0], 0.01)` icin `toEqual([0.99, 0.01])` yazmistim. IEEE754'te
+`1 - 0.99 = 0.010000000000000009` oldugu icin kaldi. Kod dogru, test fazla
+katiydi. `toBeCloseTo`'ya cevirdim ve ayrica **toplamin birebir 1 oldugunu**
+dogrulayan yeni bir test ekledim — asil onemli olan ozellik o.
