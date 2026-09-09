@@ -236,12 +236,25 @@ describe('KURAL 4 — referans her zaman terminal agent', () => {
 });
 
 describe('rapor kaydı', () => {
-  it('kırpma submitReport içinde uygulanıyor, ham değer de saklanıyor', () => {
+  it('iki aşamalı kırpma uygulanıyor, ham değer saklanıyor', () => {
     const m = runningMarket(20, neverStops());
     const a = m.drawNextAgent()!;
     const rep = m.submitReport(a, beliefFromProbability(1));
-    expect(rep.belief[1]).toBeCloseTo(0.99, 12); // epsilon=0.01 ile kırpıldı
+
+    // Varsayılan b=1, bondAmount=1 -> c = e^-1
+    // prior 0.5'ten izinli üst sınır: 1 - 0.5·e^-1 = 0.8161
+    // Yani bağlayıcı olan epsilon (0.99) değil, HAMLE LİMİTİ.
+    expect(rep.belief[1]).toBeCloseTo(1 - 0.5 * Math.exp(-1), 9);
+    expect(rep.belief[1]).toBeLessThan(0.99);
     expect(rep.rawBelief[1]).toBeCloseTo(1, 12); // ham değer korundu
+  });
+
+  it('bol teminatla epsilon bağlayıcı hale geliyor', () => {
+    // bondAmount büyükse hamle limiti gevşer ve epsilon devreye girer.
+    const m = runningMarket(20, neverStops(), { bondAmount: 100, b: 1 });
+    const a = m.drawNextAgent()!;
+    const rep = m.submitReport(a, beliefFromProbability(1));
+    expect(rep.belief[1]).toBeCloseTo(0.99, 9);
   });
 
   it('pozisyon 1den başlayıp artıyor', () => {

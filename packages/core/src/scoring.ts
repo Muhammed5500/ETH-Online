@@ -114,6 +114,76 @@ export function totalCEM(r: Belief, prior: Belief, reports: readonly Belief[]): 
 }
 
 /**
+ * Bir hamlenin en kötü durumdaki kaybı.
+ *
+ * `S_CEM(r, q, qPrev) = Σ_i r_i · log(q_i / qPrev_i)` ifadesi `r`'de DOĞRUSAL,
+ * dolayısıyla simpleks üzerindeki minimumu bir köşede:
+ *
+ *   `min_r S_CEM = min_i log(q_i / qPrev_i)`
+ *
+ * Yani agent, referansın ne çıkacağını bilmeden, en kötü ihtimalle bu kadar
+ * kaybedebilir.
+ */
+export function worstCaseLoss(b: number, qT: Belief, qPrev: Belief): number {
+  assertScorable(qT, 'q^t');
+  assertScorable(qPrev, 'q^(t-1)');
+  return -b * Math.min(Math.log(qT[0] / qPrev[0]), Math.log(qT[1] / qPrev[1]));
+}
+
+/**
+ * Teminatın izin verdiği hamle aralığı — `[minP1, maxP1]`.
+ *
+ * NEDEN GEREKLİ: settlement'ta kaybı teminat seviyesinde kırpmak teleskoplamayı
+ * bozuyor. Büyük bir kayıp kırpılınca karşı taraftaki büyük kazancı dengeleyen
+ * para ortadan kalkıyor ve fark soru sorana yıkılıyor — bütçe garantisi çöküyor.
+ *
+ * Çözüm sorunu settlement'ta yamalamak değil, rapor anında ENGELLEMEK: agent
+ * fiyatı teminatının taşıyabileceğinden fazla oynatamaz. O zaman kayıp zaten
+ * teminatı aşamaz, kırpmaya gerek kalmaz, teleskoplama korunur.
+ *
+ * `worstCaseLoss ≤ bond` koşulundan, `c = e^(-bond/b)` ile:
+ *   `q_1 ≥ qPrev_1 · c`  ve  `q_0 ≥ qPrev_0 · c`
+ * ikincisi `q_1 ≤ 1 - (1 - qPrev_1) · c` demek.
+ *
+ * Bond'un anlamı böylece netleşiyor: ne kadar teminat koyarsan konsensüsü o
+ * kadar oynatabilirsin (PLAN.md Bölüm 5.1).
+ */
+export function moveLimits(
+  qPrev: Belief,
+  b: number,
+  bondAmount: number,
+  epsilon: number,
+): { readonly minP1: number; readonly maxP1: number } {
+  assertScorable(qPrev, 'q^(t-1)');
+  if (!(b > 0)) throw new Error(`b > 0 olmalı, verilen: ${b}`);
+  if (!(bondAmount > 0)) throw new Error(`bondAmount > 0 olmalı, verilen: ${bondAmount}`);
+
+  const c = Math.exp(-bondAmount / b);
+  const lo = Math.max(epsilon, qPrev[1] * c);
+  const hi = Math.min(1 - epsilon, 1 - (1 - qPrev[1]) * c);
+
+  // Teminat çok küçükse aralık kapanabilir; o durumda hamle yok demektir.
+  if (lo > hi) {
+    const mid = Math.min(1 - epsilon, Math.max(epsilon, qPrev[1]));
+    return { minP1: mid, maxP1: mid };
+  }
+  return { minP1: lo, maxP1: hi };
+}
+
+/** Raporu hem epsilon'a hem teminatın izin verdiği hamle aralığına kırpar. */
+export function clipToAllowedMove(
+  qT: Belief,
+  qPrev: Belief,
+  b: number,
+  bondAmount: number,
+  epsilon: number,
+): Belief {
+  const { minP1, maxP1 } = moveLimits(qPrev, b, bondAmount, epsilon);
+  const p1 = Math.min(maxP1, Math.max(minP1, qT[1]));
+  return [1 - p1, p1];
+}
+
+/**
  * Soru sorana düşen maksimum CE-MSR maliyeti: `b · H(r, q^0)`.
  *
  * Paper §6.2: maliyet `k·R - H(r, q^(r-k)) + H(r, q^(0))`. `H ≥ 0` olduğu için

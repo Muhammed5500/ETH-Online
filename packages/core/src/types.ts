@@ -133,23 +133,39 @@ export interface Payout {
   readonly amount: number;
   /** Ölçeklenmemiş ham `S_CEM` değeri. Denetim için. */
   readonly scoreRaw?: number;
-  /** Bond'u aşan negatif skor kırpıldıysa, kırpılan miktar. */
-  readonly clippedBy?: number;
 }
 
 export interface Settlement {
   readonly marketId: string;
-  /** Referans agent'ın raporu. Herkesin skoru buna göre. */
-  readonly reference: Belief;
+  /**
+   * Referans agent'ın raporu. Herkesin skoru buna göre.
+   *
+   * Dejenere durumda `undefined`: hiç rapor gelmeden herkes timeout olduysa
+   * referans agent yoktur ve skorlanacak kimse kalmaz.
+   */
+  readonly reference?: Belief;
+  /** Sadece rapor veren agent'lar için. Timeout olanlar ve hiç çekilmeyenler yok. */
   readonly payouts: readonly Payout[];
-  /** Agent'lara giden net toplam (negatifler dahil). */
+
+  // --- para girişi ---
+  /** Soru soranın yatırdığı miktar. */
+  readonly deposit: number;
+  /** Tüm agent'ların yatırdığı teminat toplamı. */
+  readonly totalBonds: number;
+
+  // --- para çıkışı, bileşenlerine ayrılmış ---
+  /** Skorlardan gelen net toplam, `Σ aᵢ`. Negatif olabilir. */
+  readonly scoreTotal: number;
+  /** Agent'lara geri dönen teminat toplamı. */
+  readonly bondsReturned: number;
+  /** Timeout nedeniyle tamamen slash edilen teminat. */
+  readonly timeoutSlash: number;
+  /** Negatif skorlardan kesilen toplam. Diğer agent'lara DAĞITILMAZ, askere döner. */
+  readonly scoreSlash: number;
+  /** Agent'lara giden her şey: teminat iadesi + skor ödemeleri. */
   readonly totalToAgents: number;
   /** Soru sorana geri dönen miktar. Slash edilen para da buraya akar. */
   readonly askerRefund: number;
-  /** Negatif skorlardan kesilen toplam. Diğer agent'lara DAĞITILMAZ. */
-  readonly slashed: number;
-  /** Asker'ın yatırdığı deposit. Muhasebe denetimi için. */
-  readonly deposit: number;
 }
 
 /**

@@ -398,3 +398,109 @@ kalmali.**
 Hic rapor gelmeden herkes timeout olursa market `closed` oluyor ama
 `referenceReport` **undefined** kaliyor. Settlement bunu ele almali: skorlanacak
 kimse yok, timeout olanlarin bond'u slash edilmis, kalan her sey asker'a iade.
+
+---
+
+## ADIM 9 — Settlement Hesaplayici
+
+- **Tarih:** 2026-09-09
+- **Durum:** GECTI
+- **Test:** 18 settlement + 8 scoring (hamle limiti) yazildi
+- **Tam suite:** 99/99 yesil, build temiz
+
+### GERCEK TASARIM HATASI BULUNDU VE DUZELTILDI
+
+Bu adimin en onemli ciktisi bir test kirmizisi degil, **mimari bir hata**.
+
+Ilk uygulamada agent'in kaybi settlement'ta teminat seviyesinde KIRPILIYORDU.
+Butce siniri testi bunu yakaladi:
+
+```
+Butce siniri asildi: skorlu odemeler 256.518 > b·H(r, prior) = 34.657
+```
+
+**Neden:** kirpma **teleskoplamayi bozuyor.** Bir agent'in buyuk kaybi kirpilinca,
+karsi taraftaki buyuk kazanci dengeleyen para ortadan kalkiyor ve fark soru
+sorana yikiliyor. `Sum_t S_CEM = S_CE(r,q^T) - S_CE(r,q^0)` esitligi artik
+gecerli degil, dolayisiyla `b·log2` garantisi de yok.
+
+Bu sessiz bir hata olurdu: market calisirdi, odemeler makul gorunurdu, ama soru
+soranin maliyeti sinirsiz olurdu.
+
+### Cozum: bond = kirpma esigi degil, POZISYON LIMITI
+
+**PLAN.md Bolum 5.1 zaten dogruyu yaziyormus**, ben ADIM 9'da yanlis uyguladim.
+Plan diyor ki: "Bond'u giris ucreti degil pozisyon limiti olarak kullan. Agent
+q^(t)'yi bond'unun tasiyabilecegi kadar oynatabilsin."
+
+Sorunu settlement'ta yamalamak yerine **rapor aninda engelliyoruz.**
+
+Turetme: `S_CEM(r, q, qPrev) = Sum_i r_i log(q_i/qPrev_i)` ifadesi `r`'de
+DOGRUSAL, dolayisiyla simpleks uzerindeki minimumu bir kosede:
+
+```
+worstCaseLoss = -b · min_i log(q_i / qPrev_i)
+```
+
+`worstCaseLoss <= bond` kosulundan, `c = e^(-bond/b)` ile izinli aralik:
+
+```
+q_1 >= qPrev_1 · c
+q_1 <= 1 - (1 - qPrev_1) · c
+```
+
+Ornek: b=1, bond=1, qPrev=0.5 -> c=e^-1=0.368 -> q_1 in [0.184, 0.816].
+
+### Uygulama
+
+- `scoring.ts`: `worstCaseLoss`, `moveLimits`, `clipToAllowedMove` eklendi
+- `market.ts`: `submitReport` iki asamali kirpiyor — once epsilon (log(0)
+  saldirisi), sonra hamle limiti
+- `settlement.ts`: kirpma TAMAMEN KALDIRILDI. Teminati asan kayip gelirse artik
+  sessizce duzeltilmiyor, **hata firlatiliyor** — market hatali bir hamleye izin
+  vermis demektir
+- `types.ts`: `Payout.clippedBy` kaldirildi, artik kimse set etmiyor
+
+Bond'un anlami boylece netlesti: **ne kadar teminat koyarsan konsensusu o kadar
+oynatabilirsin.** Bu, mekanizma acisindan da dogru: fiyati cok oynatmak cok risk
+almak demek.
+
+### Ikinci bulgu: yanlis degismez
+
+Testte "pozitif odemelerin toplami deposit'i asamaz" diye yazmistim. Yanlis:
+pozitifler negatiflerle dengelendigi icin toplamlari deposit'i asabilir.
+
+Dogru ve kanitlanabilir garanti: **askerRefund >= 0**.
+
+```
+askerRefund = deposit - pozitif + scoreSlash + timeoutSlash
+            = b·log2 - netScored + timeoutSlash
+netScored <= b·log2 (teleskoplama)  =>  askerRefund >= 0
+```
+
+Bunu teste degil, `assertSettlementInvariants` icine gercek bir degismez olarak
+koydum.
+
+### Dayatilan bes degismez
+
+`assertSettlementInvariants` her settlement'ta calisiyor:
+
+1. Skorlu odemeler `b·H(r, prior)` asmiyor (teleskoplama)
+2. Sabit ucret alan sayisi tam olarak `min(k, n)`
+3. Muhasebe kapaniyor: `deposit + totalBonds == totalToAgents + askerRefund`
+4. `askerRefund >= 0` — soru soranin cebinden deposit'ten fazlasi cikmiyor
+5. Hicbir kayip teminati asmiyor
+
+3 numarali degismez 100 rastgele markette ve timeout'lu senaryoda dogrulandi.
+
+### Dejenere durum ele alindi
+
+Hic rapor gelmeden herkes timeout olursa `reference` undefined kaliyor.
+Settlement bunu isliyor: odeme yok, timeout olanlarin teminati slash, hic
+cekilmeyenlerin teminati iade, kalan her sey askere.
+
+### ADIM 8'de guncellenen test
+
+`submitReport` artik iki asamali kirptigi icin `0.5 -> 1.0` hamlesi epsilon'da
+(0.99) degil hamle limitinde (0.816) duruyor. ADIM 8 testi buna gore
+guncellendi, ayrica "bol teminatla epsilon baglayici olur" testi eklendi.

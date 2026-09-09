@@ -2,12 +2,15 @@ import { describe, expect, it } from 'vitest';
 import { beliefFromProbability, UNIFORM_PRIOR } from '../src/config.js';
 import {
   clipBelief,
+  clipToAllowedMove,
   crossEntropy,
   kl,
   maxTotalPayout,
+  moveLimits,
   scoreCE,
   scoreCEM,
   totalCEM,
+  worstCaseLoss,
 } from '../src/scoring.js';
 import type { Belief } from '../src/types.js';
 import { SeededRandom } from './helpers.js';
@@ -182,6 +185,76 @@ describe('DEĞİŞMEZ 2 — bütçe sınırı', () => {
       expect(total).toBeLessThanOrEqual(maxTotalPayout(1, prior, r) + 1e-12);
       expect(total).toBeLessThanOrEqual(maxTotalPayout(1, prior) + 1e-12);
     }
+  });
+});
+
+describe('hamle limiti — teminatın taşıdığı kadar oynatma', () => {
+  it('worstCaseLoss referans üzerinden minimum köşede', () => {
+    const qPrev = beliefFromProbability(0.5);
+    const qT = beliefFromProbability(0.8);
+    const worst = worstCaseLoss(1, qT, qPrev);
+
+    // Tüm olası referanslar denendiğinde hiçbiri bu sınırdan kötü olamaz
+    const rng = new SeededRandom(21);
+    for (let i = 0; i < 500; i++) {
+      const r = randomBelief(rng, `r${i}`);
+      expect(scoreCEM(r, qT, qPrev)).toBeGreaterThanOrEqual(-worst - 1e-12);
+    }
+  });
+
+  it('hareket yoksa en kötü kayıp sıfır', () => {
+    const q = beliefFromProbability(0.4);
+    expect(worstCaseLoss(1, q, q)).toBeCloseTo(0, 12);
+  });
+
+  it('izinli aralıktaki hiçbir hamle teminatı aşamıyor', () => {
+    const rng = new SeededRandom(33);
+    for (let i = 0; i < 300; i++) {
+      const bond = 0.2 + rng.next(`b${i}`) * 3;
+      const b = 0.5 + rng.next(`s${i}`) * 2;
+      const qPrev = randomBelief(rng, `prev${i}`);
+      const { minP1, maxP1 } = moveLimits(qPrev, b, bond, EPS);
+
+      for (const p1 of [minP1, maxP1, (minP1 + maxP1) / 2]) {
+        const qT: Belief = [1 - p1, p1];
+        expect(worstCaseLoss(b, qT, qPrev)).toBeLessThanOrEqual(bond + 1e-9);
+      }
+    }
+  });
+
+  it('aralık dışına çıkan rapor sınıra kırpılıyor', () => {
+    const qPrev = beliefFromProbability(0.5);
+    const clipped = clipToAllowedMove(beliefFromProbability(0.999), qPrev, 1, 1, EPS);
+    expect(clipped[1]).toBeCloseTo(1 - 0.5 * Math.exp(-1), 9);
+
+    const clippedDown = clipToAllowedMove(beliefFromProbability(0.001), qPrev, 1, 1, EPS);
+    expect(clippedDown[1]).toBeCloseTo(0.5 * Math.exp(-1), 9);
+  });
+
+  it('aralık içindeki rapora dokunulmuyor', () => {
+    const qPrev = beliefFromProbability(0.5);
+    const q = clipToAllowedMove(beliefFromProbability(0.6), qPrev, 1, 1, EPS);
+    expect(q[1]).toBeCloseTo(0.6, 12);
+  });
+
+  it('daha çok teminat daha geniş aralık veriyor', () => {
+    const qPrev = beliefFromProbability(0.5);
+    const small = moveLimits(qPrev, 1, 0.5, EPS);
+    const large = moveLimits(qPrev, 1, 5, EPS);
+    expect(large.maxP1).toBeGreaterThan(small.maxP1);
+    expect(large.minP1).toBeLessThan(small.minP1);
+  });
+
+  it('bol teminatta epsilon bağlayıcı oluyor', () => {
+    const { minP1, maxP1 } = moveLimits(beliefFromProbability(0.5), 1, 1000, EPS);
+    expect(minP1).toBeCloseTo(EPS, 12);
+    expect(maxP1).toBeCloseTo(1 - EPS, 12);
+  });
+
+  it('geçersiz b ve bondAmount reddediliyor', () => {
+    const q = beliefFromProbability(0.5);
+    expect(() => moveLimits(q, 0, 1, EPS)).toThrowError(/b > 0/);
+    expect(() => moveLimits(q, 1, 0, EPS)).toThrowError(/bondAmount > 0/);
   });
 });
 

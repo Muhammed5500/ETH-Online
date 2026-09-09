@@ -30,12 +30,22 @@ export {
 
 export {
   clipBelief,
+  clipToAllowedMove,
   crossEntropy,
   kl,
   maxTotalPayout,
+  moveLimits,
   scoreCE,
   scoreCEM,
   totalCEM,
+  worstCaseLoss,
 } from './scoring.js';
+
+export {
+  assertSettlementInvariants,
+  computeSettlement,
+  requiredDeposit,
+  type SettlementOptions,
+} from './settlement.js';
 
 export { createMarketState, Market, type CreateMarketOptions } from './market.js';

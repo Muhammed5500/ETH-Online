@@ -21,7 +21,7 @@
  *      sınırsız zarar.
  */
 import { assertValidParams, normalizeBelief, UNIFORM_PRIOR } from './config.js';
-import { clipBelief } from './scoring.js';
+import { clipBelief, clipToAllowedMove } from './scoring.js';
 import type {
   Belief,
   MarketParams,
@@ -153,10 +153,22 @@ export class Market {
     }
 
     const normalized = normalizeBelief(rawBelief);
+    const { epsilon, b, bondAmount } = this.state.params;
+
+    // İki aşamalı kırpma:
+    //   1. epsilon — log(0) saldırısını kapatır (paper Ek C.2)
+    //   2. hamle limiti — teminatın taşıyabileceğinden fazla oynatmayı engeller
+    //
+    // İkincisi olmadan bir agent teminatını aşan kayıp üretebilir; kaybı
+    // settlement'ta kırpmak ise teleskoplamayı bozup soru soranın bütçe
+    // garantisini yok ediyor. Sorunu burada, kaynağında engelliyoruz.
+    const epsilonClipped = clipBelief(normalized, epsilon);
+    const belief = clipToAllowedMove(epsilonClipped, this.currentPrice(), b, bondAmount, epsilon);
+
     const report: Report = {
       agentId,
       position: this.state.reports.length + 1,
-      belief: clipBelief(normalized, this.state.params.epsilon),
+      belief,
       rawBelief: normalized,
       timestamp: Date.now(),
     };
