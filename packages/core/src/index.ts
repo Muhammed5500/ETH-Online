@@ -29,6 +29,13 @@ export {
 } from './config.js';
 
 export {
+  deviationBound,
+  kMinApprox,
+  kMinStrict,
+  signalSpread,
+} from './kcalc.js';
+
+export {
   clipBelief,
   clipToAllowedMove,
   crossEntropy,

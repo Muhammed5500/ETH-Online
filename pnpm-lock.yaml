@@ -8,6 +8,9 @@ importers:
 
   .:
     dependencies:
+      '@ethonline/core':
+        specifier: workspace:*
+        version: link:packages/core
       '@hashgraph/sdk':
         specifier: ^2.81.0
         version: 2.81.0(bn.js@5.2.5)(react-native@0.87.1(@babel/core@7.29.7)(react@19.2.8))

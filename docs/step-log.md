@@ -504,3 +504,138 @@ cekilmeyenlerin teminati iade, kalan her sey askere.
 `submitReport` artik iki asamali kirptigi icin `0.5 -> 1.0` hamlesi epsilon'da
 (0.99) degil hamle limitinde (0.816) duruyor. ADIM 8 testi buna gore
 guncellendi, ayrica "bol teminatla epsilon baglayici olur" testi eklendi.
+
+---
+
+## ADIM 10 — k Hesaplayıcı (Teorem 1 ve Teorem 4)
+
+- **Tarih:** 2026-09-10
+- **Durum:** GEÇTİ
+- **Test:** 64 yazıldı, 64 geçti
+- **Tam suite:** 163/163 yeşil, build temiz
+- **Kanıt:** `pnpm kcalc` çıktısı aşağıda özetli; `pnpm test` 163/163; `pnpm build` exit 0
+
+### DİL DEĞİŞİMİ — bu adımdan itibaren
+
+Kod, kod yorumları, hata mesajları ve CLI çıktısı bundan sonra **İngilizce**.
+Planlama dokümanları (PLAN.md, ROADMAP.md, bu dosya) Türkçe kalıyor.
+
+Gerekçe: repo ve CLI çıktısı submission'ın parçası, jüri okuyacak. ADIM 6-9'da
+yazılan `packages/core` dosyaları hâlâ Türkçe yorumlu; tek seferde çevrilmesi
+bekliyor (öneri: ADIM 32, README yazarken, çünkü o adımda zaten hepsi
+okunacak).
+
+### Yazılanlar
+
+`packages/core/src/kcalc.ts`:
+
+| Fonksiyon | Kaynak |
+|---|---|
+| `signalSpread(eta)` | `(1-η)/η - η/(1-η)`, üç formülün de ortak çarpanı |
+| `deviationBound(delta, eta, k)` | Teorem 1, sapma sınırı |
+| `kMinApprox(delta, eta, epsilonPrime)` | Teorem 1, Denklem 3 |
+| `kMinStrict(delta, eta, tau)` | Teorem 4, Denklem 7 |
+| `poolExhaustionProbability`, `flatFeeProbability` | `config.ts`'ten yeniden dışa aktarım |
+
+`scripts/kcalc.ts` — dört tablo + karar bloğu basan CLI (`pnpm kcalc`).
+
+### Doğrulama — PLAN'daki her sayı koddan çıkıyor
+
+CLI çıktısı PLAN.md'deki üç tabloyla **birebir** eşleşiyor:
+
+| Tablo | Kaynak | Durum |
+|---|---|---|
+| kMinApprox, ε=0.05 (12 hücre) | PLAN 2.3 | ✓ 4.2 / 5.5 / 6.6 … 27.8 / 36.0 / 43.2 |
+| kMinStrict (9 hücre) | PLAN 2.3 | ✓ 4.7 / 6.7 / 9.3 … 16.0 / 19.9 / 25.0 |
+| Havuz seçenek tablosu | PLAN 4.1 | ✓ %5.3 / %7.9 / %10.7 / %16.4 |
+| Sapma sınırı k=3/4/6 | PLAN 4.3 | ✓ 0.278 / 0.139 / 0.035 |
+
+ROADMAP'in istediği ±0.05 toleransı fazlasıyla sağlanıyor; sapmaların hepsi
+0.04'ün altında ve bu yuvarlamadan geliyor (PLAN tabloları 1 ondalıklı).
+
+### En değerli test: ters çevirme değişmezi
+
+`deviationBound` ile `kMinApprox` paper'da **ayrı iki denklem** ve koda ayrı
+ayrı geçirildi. Denklem 3, Teorem 1'in sınırının k için çözülmüş hali,
+dolayısıyla ikisi birbirinin tam tersi olmak zorunda:
+
+```
+deviationBound(δ, η, kMinApprox(δ, η, ε)) === ε     (tolerans 1e-10)
+```
+
+Beş farklı parametre üçlüsünde geçiyor. Herhangi biri yanlış kopyalanmış olsa
+bu tur anında kırmızı yanardı. Tabloları kendi kendine doğrulayan bir teste
+göre çok daha güçlü bir kontrol.
+
+Ayrıca `Math.ceil(kMinApprox(...))` her zaman hedefin **içine** düşüyor, yani
+yukarı yuvarlama güvenli tarafta kalıyor.
+
+### k=3 boşluğu artık bir test
+
+README'deki iddia koda bağlandı, iddia ile kod sessizce ayrışamıyor:
+
+```
+Math.ceil(kMinApprox(0.5, 0.1, 0.05)) === 6      // sınırın istediği
+DEFAULT_PARAMS.k === 3                            // koştuğumuz
+deviationBound(0.5, 0.1, 3) ≈ 0.278               // bedeli
+deviationBound(0.5, 0.1, 6) ≈ 0.035
+```
+
+### PLAN Bölüm 14 için not — ikinci bir sayı var
+
+PLAN'ın dürüstlük beyanı sadece Teorem 1'in sayısını (k≈6) veriyor. CLI aynı
+referans parametrelerde Teorem 4'ün (strict truthfulness, τ=1.0) **k > 8.24,
+yani 9 agent** istediğini de basıyor. Bu sayı PLAN 2.3'teki tabloda zaten
+vardı ama Bölüm 14'e taşınmamış.
+
+Boşluk düşünülenden büyük. ADIM 32'de README yazılırken iki sınır da
+verilmeli: Teorem 1 için 6, Teorem 4 için 9. Saklanacak bir şey değil, aksine
+"iki farklı dürüstlük tanımının iki farklı fiyatı var" ayrımı anlatımı
+güçlendiriyor.
+
+### ROADMAP'ten sapmalar
+
+**1. `poolExhaustionProbability` ve `flatFeeProbability` kopyalanmadı.**
+ROADMAP ikisini de `kcalc.ts` imzasında listeliyor, ama ADIM 6'da zaten
+`config.ts`'e yazılmışlardı ve parametre doğrulaması onları kullanıyor.
+Yeniden yazmak iki gerçek kaynak üretirdi. `kcalc.ts` bunları `config.ts`'ten
+yeniden dışa aktarıyor: ROADMAP'in istediği yüzey duruyor, tek kaynak korunuyor.
+
+**2. Kök `build` scripti artık `scripts/` klasörünü de tip kontrolünden
+geçiriyor.** `tsconfig.scripts.json` eklendi, kök `build` = `pnpm -r build &&
+tsc -p tsconfig.scripts.json`.
+
+Gerekçe: `scripts/kcalc.ts` README'ye girecek submission kodu ama hiçbir
+workspace paketinin tsconfig'inde değildi, yani hiç tip kontrolü görmüyordu.
+`scripts/check-hedera.ts` de aynı durumdaydı. ADIM 8'in dersi tam buydu:
+testler yeşilken build kırmızıydı ve gerçek bir imza hatası yakalanmıştı.
+`pnpm -r build` tek başına yeterli değil çünkü `-r` kök paketi kapsamıyor.
+
+`pnpm -r build` hâlâ çalışıyor ve değişmedi; kapı komutu `pnpm build` olarak
+kullanılmalı. İkisi de şu an yeşil, mevcut `check-hedera.ts`'te tip hatası
+çıkmadı.
+
+**3. `@ethonline/core` kök `package.json`'a bağımlılık olarak eklendi**
+(`workspace:*`). Böylece `scripts/*` paketi ismiyle import edebiliyor, göreli
+yola gerek kalmıyor. ADIM 12 (`setup-hedera-accounts.ts`) ve ADIM 21
+(`register-agents.ts`) aynı ihtiyacı duyacak.
+
+### Tuzaklar
+
+Bu adımda kırmızı test çıkmadı, düzeltilecek bir şey de olmadı. Formüller
+PLAN Bölüm 2.3'te zaten elle hesaplanmış ve tablolanmıştı; kod onları
+üretti, tersini değil.
+
+Tek küçük engel araç tarafında: büyük dosyayı bash heredoc ile yazmak
+başarısız oldu (`unexpected EOF`), dosya hiç oluşmadı. Doğrudan dosya yazma
+aracına geçildi. Kaydediliyor çünkü sonraki adımlarda daha büyük dosyalar var.
+
+### Kalan risk
+
+Mekanizma tarafında yok — bu adım saf hesap, mekanizmaya dokunmuyor.
+
+Proje tarafında **ADIM 4 (SPIKE C, ENSv2 Sepolia) hâlâ açık** ve ADIM 5
+(spike kapısı) hiç çalıştırılmadı. ADIM 3'ün kaydındaki uyarı geçerliliğini
+koruyor: ENS'te Sepolia adresleri dokümanda yok ve "admin rolleri sadece
+registration anında" kısıtı deneyerek doğrulanmalı. FAZ 2'ye (Hedera)
+girmeden önce bir oturum ayrılmalı; kesme kararı 12. güne bırakılmamalı.
