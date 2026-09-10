@@ -13,6 +13,7 @@
     "build": "tsc -p tsconfig.json"
   },
   "dependencies": {
-    "@ethonline/core": "workspace:*"
+    "@ethonline/core": "workspace:*",
+    "@graphprotocol/client-x402": "^1.0.0"
   }
 }

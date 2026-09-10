@@ -1537,9 +1537,10 @@ ADIM 4 (ENS spike) hâlâ açık.
 ## ADIM 17 — Hedera Uçtan Uca Entegrasyon Testi
 
 - **Tarih:** 2026-09-10
-- **Durum:** KISMEN GEÇTİ — test yazıldı ve tamamlandı, iki testin ikisi de
-  zincirde ayrı ayrı geçti, ama **aynı koşuda ikisi birden yeşil olmadı.**
-  Engelleyen şey kod değil, ağ.
+- **Durum:** GEÇTİ (2026-09-10 15:04 kapandı). Gün içinde KISMEN GEÇTİ olarak
+  yazılmıştı: iki test zincirde ayrı ayrı geçiyordu ama aynı koşuda ikisi
+  birden yeşil olmamıştı. Engelleyen şey kod değil ağdı; facilitator gecikmesi
+  düşünce **tek koşuda ikisi de geçti, kodda hiçbir değişiklik yapılmadan.**
 - **Test:** 2 entegrasyon testi + 6 birim testi (hata yolları)
 - **Tam suite:** 387/387 yeşil, build temiz
 
@@ -1649,13 +1650,169 @@ Yeniden kurdum: **bütün** agent'lar susuyor. İddia artık tam:
 "Timeout sonrası market devam eder" yolu birim testlerinde zaten deterministik
 olarak kapsanıyor.
 
-### Kalan iş
+### KAPANIŞ KOŞUSU — 2026-09-10 15:02
 
-Ağ toparladığında `pnpm test:integration` tek koşuda yeşil görülmeli. Kod
-tarafında bilinen bir eksik yok; her iki test de ayrı ayrı zincirde geçti.
+```
+apps/api/test/e2e-hedera.integration.test.ts  (2 tests)  162030 ms
+  ✓ runs a full market and closes the books on chain   102937 ms
+  ✓ slashes silent agents and rolls the dice ZERO times  59090 ms
+
+Test Files  1 passed (1)
+Tests       2 passed (2)
+Duration    164.15 s
+```
+
+Koşu öncesi ölçüm, dünkü tabloyla aynı formatta:
+
+```
+facilitator (api.testnet.blocky402.com):  connect 6.73 sn  (dun 10-14, sabah 0.4)
+hedera mirror node:                        connect 0.11 sn
+```
+
+Yani facilitator hala normalden yavas ama ADIM 17'de 30 sn'ye cekilen zaman
+asimi bu araligi tasiyor. Dun eklenen uc duzeltmenin (isitma, ayarlanabilir
+timeout, `onlyPaidRoutes`) hicbiri geri alinmadi; tek degisken agdi.
+
+### Kalan iş
 
 ADIM 16'da not düşülen iki kısıt duruyor: transfer parçaları birbirine göre
 atomik değil, ve settlement kısmi bir başarısızlıktan sonra tekrar
 çalıştırılırsa ödenmiş parçalar yeniden ödenir.
+
+ADIM 4 (ENS spike) hâlâ açık.
+
+---
+
+## ADIM 18 — Graph Gateway Client
+
+- **Tarih:** 2026-09-10
+- **Durum:** GEÇTİ
+- **Test:** 90 yazıldı, 90 geçti, 0 kaldı
+- **Tam suite:** 477/477 yeşil (2.91 sn), `pnpm -r build` temiz
+
+### Kullanılan sürümler
+
+| Paket | Sürüm |
+|---|---|
+| @graphprotocol/client-x402 | 1.0.0 |
+| @x402/fetch (transitif) | 2.25.0 |
+| @x402/evm (transitif) | 2.25.0 |
+
+### Yazılanlar
+
+| Dosya | İş |
+|---|---|
+| `packages/graph/src/x402.ts` | 402 daveti ve settlement makbuzunun çözülmesi. Bağımlılık yok |
+| `packages/graph/src/errors.ts` | `GraphQueryError` + `kind` + `retryable` |
+| `packages/graph/src/gateway.ts` | `GraphGateway`: iki mod, retry, maliyet muhasebesi |
+| `packages/graph/src/x402-fetch.ts` | Ödeme yapan fetch, dinamik import |
+| `packages/graph/src/env.ts` | `.env`'den yapılandırma ve fabrika |
+| `scripts/check-graph.ts` | Canlı gateway'e karşı manuel kapı (`pnpm check:graph`) |
+
+### CANLI GATEWAY'DEN ÖĞRENİLEN İKİ ŞEY
+
+Bunların ikisi de ADIM 3'ün notlarında yoktu ve ikisi de kodu değiştirdi.
+
+**1. 402 daveti gövdede değil, `payment-required` header'ında.**
+
+ADIM 3 daveti JSON gövde olarak kaydetmişti. Bugün ölçülen:
+
+```
+POST https://gateway.thegraph.com/api/x402/subgraphs/id/<id>
+-> HTTP/1.1 402 Payment Required
+   Content-Length: 0
+   payment-required: <base64 JSON>
+```
+
+Gövde **sıfır bayt.** O nota göre yazılmış bir istemci `await res.json()`
+çağırır, sıfır baytta parse hatası alır ve tamamen olağan bir ödeme talebini
+"bozuk yanıt" diye raporlar. Header'ın kendisi test dosyasına birebir fixture
+olarak konuldu; gateway fiyatı değiştirirse kırmızı test olarak görünür.
+
+Davetin içeriği: `eip155:8453` (Base **mainnet**), 10000 raw USDC = **$0.01**,
+`eip3009` (gasless — ödeyen imzalar, gas'ı facilitator öder, yani agent'ın ETH
+tutmasına gerek yok).
+
+**2. Auth hatası HTTP 200 dönüyor.**
+
+```
+POST /api/subgraphs/id/<id>   (Authorization header yok)
+-> HTTP 200
+   {"errors":[{"message":"auth error: missing authorization header"}]}
+```
+
+`res.ok` true. Sadece `res.ok`'e bakan bir istemci `body.data` okur, `undefined`
+alır ve agent'a **boş kanıt kümesi** verir. Agent yine de bir olasılık raporlar
+ve o rapor paranın kime gideceğini belirler. Bu yüzden GraphQL `errors` dizisi
+burada uyarı değil, fırlatılan hata. Kısmi veri (`data` + `errors` birlikte) de
+reddediliyor: yarısı eksik bir kanıt kümesi üzerinde akıl yürütmek, hiç veri
+almamaktan daha tehlikeli çünkü eksiklik görünmüyor.
+
+### Tasarım kararları
+
+**Ödeme asla tekrar denenmiyor.** x402 modunda her deneme yeni bir ödeme. 402'yi
+geçici sayan bir retry döngüsü, hiç gelmeyen cevaplar için üst üste para öder.
+`retryable` yalnızca network hatası, 429 ve 5xx için true. Hedera retry
+politikasındaki doktrinin aynısı: tanınmayan hata kalıcı sayılır.
+
+**Maliyet ikiye ayrılıyor: `settled` ve `estimated`.** Settlement makbuzu paranın
+gerçekten hareket ettiğinin tek kanıtı. Ama makbuz miktar taşımıyorsa dolar
+rakamı yine liste fiyatından geliyor. Bu kombinasyon (settled=true,
+estimated=true) olduğu gibi raporlanıyor. Ödeme yapılıp sonra başarısız olan
+sorgu da muhasebeye giriyor — para gitti, veri gelmedi.
+
+**Ondalık tahmin edilmiyor.** 402 daveti miktar ve varlık adresi veriyor ama
+ondalık sayısını vermiyor. USDC için 6 varsaymak doğru, 18 ondalıklı bir token
+için 12 basamak yanlış olur. `KNOWN_ASSETS`'te olmayan varlık için dolar rakamı
+**verilmiyor**, ham miktar veriliyor.
+
+**Ödeme sarmalayıcısı için Graph'in kendi paketi kullanıldı.** Kendi
+sarmalayıcımızı yazıp harcama tavanı koymak cazipti, ama `x402Client` zaten
+varsayılan spend control uyguluyor ve USDC tanınan varlık. Üstelik bu yol
+offline test edilemiyor (test USDC yok, testnet gateway yok), dolayısıyla
+bizden başkasının da çalıştırdığı sürüm daha değerli. Kaçış kapısı açık:
+`GraphGateway` herhangi bir `fetchImpl` kabul ediyor.
+
+### Testnet gateway hâlâ ölü
+
+`testnet.gateway.thegraph.com` için A kaydı bugün de yok (Google public DNS,
+`http=000`). ADIM 3'ün bulgusu duruyor: **x402 = gerçek para.** Bu yüzden
+varsayılan mod `.env.example`'da `apikey`'e çekildi ve `check:graph` x402
+modunda ödeme yapmıyor — `--pay` bayrağı gerekiyor.
+
+### Kanıt
+
+```
+pnpm check:graph
+  [PASS] Gateway asks for payment (HTTP 402)
+  [PASS] Challenge arrives in the "payment-required" header
+         body is 0 bytes — the challenge is NOT in it
+  [PASS] Decoded with our own decoder (x402 v2)
+         network  eip155:8453
+         asset    0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913 (USDC)
+         amount   10000 raw
+  [PASS] Price resolves to a dollar figure   $0.01 per query
+         transfer eip3009 (gasless: payer needs no ETH)
+  [PASS] Unauthenticated query answers HTTP 200, not 401
+  [PASS] Client refuses to read that as data (kind: graphql)
+  [PASS] Nothing was charged for it
+  [SKIP] 3. A REAL QUERY — kimlik bilgisi yok
+ALL CHECKS PASSED
+```
+
+### Kalan iş
+
+Kabul kriterinin "her iki modda da sorgu çalışıyor" maddesi **yarım**: canlı
+sorgu hiçbir modda çalıştırılamadı çünkü `.env`'de ne `GRAPH_API_KEY` ne
+`GRAPH_X402_PRIVATE_KEY` var. Kodun her iki yolu da birim testlerinde kapsanıyor
+ve 402/200-auth davranışı canlı gateway'e karşı doğrulandı, ama uçtan uca sorgu
+kanıtı için gereken:
+
+1. **Studio API key** (ücretsiz, thegraph.com/studio) → `pnpm check:graph` 3.
+   bölümü yeşile döner, ADIM 19 gerçek veriyle yazılabilir.
+2. Demo/video için Base ağında ~$10 USDC → `pnpm check:graph --pay`.
+
+ADIM 19 (veri dilimleri) kabul kriteri "5 dilim de **gerçek veri** dönüyor"
+diyor, yani (1) olmadan ADIM 19 tamamlanamaz.
 
 ADIM 4 (ENS spike) hâlâ açık.

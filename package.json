@@ -20,7 +20,8 @@
     "check:randomness": "tsx scripts/check-randomness.ts",
     "api": "tsx apps/api/src/server.ts",
     "check:api": "tsx scripts/check-api.ts",
-    "check:orchestrator": "tsx scripts/check-orchestrator.ts"
+    "check:orchestrator": "tsx scripts/check-orchestrator.ts",
+    "check:graph": "tsx scripts/check-graph.ts"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
@@ -38,6 +39,7 @@
     "@ethonline/api": "workspace:*",
     "@x402/fetch": "^2.25.0",
     "@x402/hedera": "^2.25.0",
-    "express": "^5.2.1"
+    "express": "^5.2.1",
+    "@ethonline/graph": "workspace:*"
   }
 }
