@@ -1816,3 +1816,111 @@ ADIM 19 (veri dilimleri) kabul kriteri "5 dilim de **gerçek veri** dönüyor"
 diyor, yani (1) olmadan ADIM 19 tamamlanamaz.
 
 ADIM 4 (ENS spike) hâlâ açık.
+
+---
+
+## ADIM 19 — Veri Dilimleri
+
+- **Tarih:** 2026-09-10
+- **Durum:** KISMEN GEÇTİ — kod ve testler tamam, kabul kriterinin "gerçek veri"
+  maddesi kimlik bilgisi olmadığı için doğrulanamadı. Ayrıntı aşağıda.
+- **Test:** 77 yazıldı, 77 geçti, 0 kaldı
+- **Tam suite:** 554/554 yeşil (3.28 sn), `pnpm -r build` temiz
+
+### Yazılanlar
+
+| Dosya | İş |
+|---|---|
+| `slices/types.ts` | `DataSlice`, `SliceEvidence`, `SliceSignal`, `QuestionContext` |
+| `slices/stats.ts` | Ortak matematik: HHI, top-N pay, varyasyon katsayısı, yüzdelik |
+| `slices/liquidity.ts` | Havuz derinliği, TVL konsantrasyonu, devir hızı |
+| `slices/holders.ts` | Deposit akışından yatırımcı konsantrasyonu, geri dönmeyen adres |
+| `slices/activity.ts` | Zamanlama düzenliliği, self-trade, tekrar eden gönderen |
+| `slices/bridge.ts` | Zincirler arası giriş/çıkış, rota konsantrasyonu, self-bridge |
+| `slices/comparative.ts` | Tek sorgu deseni, 5+ protokol, yüzdelik sıralama |
+
+### SORGULAR HAFIZADAN YAZILMADI
+
+Messari'nin gerçek şeması indirildi (`schema-dex-amm.graphql` 822 satır,
+`schema-bridge.graphql`) ve bütün alan adları oradan alındı. Sebep: gateway'e
+sorgu atacak kimlik bilgimiz yok, yani yanlış bir alan adı ancak demo günü
+ortaya çıkardı. Test fixture'ları da aynı gerçek alan adlarını kullanıyor.
+
+**Şemadan çıkan iki kısıt tasarımı değiştirdi:**
+
+1. **`Account` entity'sinde sadece `id` var.** Bakiye alanı yok. Yani "holder
+   konsantrasyonu" bakiyeden okunamıyor. Hafızadan yazan biri olmayan bir
+   bakiye alanına uzanır, gateway HTTP 200 + GraphQL hatası döner, ve ADIM
+   18'deki kontroller olmasa bu agent'a **boş kanıt kümesi** olarak ulaşırdı.
+   Çözüm: konsantrasyon **stoktan değil akıştan** türetiliyor — pencere
+   içindeki `Deposit` olaylarının `from` + `amountUSD` alanları adres bazında
+   toplanıyor. Bu farklı bir büyüklük (pencere öncesi yatırılan sermayeyi
+   görmüyor) ve bu, örtülmek yerine kalıcı bir caveat olarak raporlanıyor.
+
+2. **Standartta gas alanı yok.** `Event` arayüzünde `hash`, `logIndex`, `to`,
+   `from`, `blockNumber`, `timestamp` var, başka bir şey yok. ROADMAP'in
+   activity dilimi için önerdiği "gas desenleri" bu yüzden yazılamadı.
+   Standarttan çıkıp tek alan için özel subgraph'a gitmek her dilimin dayandığı
+   çok-protokol kaldıracını yakardı. Yerine zamanlama ve tekrar ölçüleri kondu:
+   varyasyon katsayısı, self-trade payı, tek-atış gönderen payı, yuvarlak
+   miktar payı, saat konsantrasyonu.
+
+### VARSAYIM 4 BİR TEST OLARAK YAZILDI
+
+`slices.test.ts` içindeki en önemli assertion: aynı market beslendiğinde beş
+dilim **kesişmeyen** sinyal kümeleri üretmeli. İki dilim aynı satırlardan aynı
+istatistiği hesaplıyorsa bu iki oy kullanan tek dilimdir; δ → 1 gider ve Teorem
+1'in istediği k onunla birlikte patlar. Test bütün dilim çiftlerini geziyor ve
+ortak anahtar bulursa isim vererek kırmızıya düşüyor.
+
+Ayrıca `check:graph --slices` aynı kontrolü canlı veride yapıyor.
+
+### Dilimlerin gerçekten farklı olduğunun ikinci kanıtı
+
+Activity dilimi iki fixture ile test ediliyor: 60 saniyede bir, tek adresten
+kendisine, hep 10000 USD'lik 10 swap; ve 10 farklı adresten düzensiz aralıklı,
+dağınık miktarlı 10 swap. Birincide `interarrival_cv = 0`, `self_trade_share =
+1`, `round_amount_share = 1`. İkincide sırasıyla >1, 0, 0. Ölçü ayırt ediyor.
+
+Comparative dilimi 6 protokole **tek sorgu metni** gönderiyor ve wash şeklindeki
+denek turnover'da yüzdelik 1, revenue yield'de yüzdelik 0 çıkıyor — çok işlem
+yapıp hiç ücret üretmeyen hacmin imzası.
+
+### Bir dilim asla cevabı vermiyor
+
+Dilimler kanıt ve türetilmiş sayı döndürüyor, hüküm değil. Hüküm dilimde olsaydı
+20 agent yapı gereği aynı fikirde olurdu — ki bu dosyanın var olma sebebi tam
+olarak bunu engellemek. Test bunu da kontrol ediyor.
+
+### Testi değiştirdim, gerekçesi
+
+İki assertion `toBeCloseTo(2/3, 10)` yazmıştı ve kırmızıydı. Sebep koddaki hata
+değil: `signal()` çıkışta altı ondalığa yuvarlıyor (HCS defterindeki round6 ile
+aynı sözleşme), ben API'nin hiç vermediği bir hassasiyeti iddia etmiştim.
+Testleri `toBe(0.666667)` yaptım ve yuvarlama sözleşmesini örtük bırakmamak için
+ayrı bir test ekledim. Bu testi gevşetmek değil, doğru sözleşmeyi test etmek.
+
+### Kabul kriterleri
+
+| Kriter | Durum |
+|---|---|
+| 5 dilim de gerçek veri dönüyor | **HAYIR** — kimlik bilgisi yok |
+| Her dilim farklı entity/sorgu kullanıyor | EVET, test ediyor |
+| `comparative` 5+ protokolü tek sorgu deseniyle tarıyor | EVET, test ediyor |
+| Maliyetler raporlanıyor | EVET, dilim başına + toplam |
+
+### Kalan iş
+
+Studio API key (ücretsiz) + Messari standardize deployment id'leri gerekiyor.
+Id'ler sabit yazılmadı, `.env`'e kondu (`GRAPH_SUBJECT_SUBGRAPH`,
+`GRAPH_PEER_SUBGRAPHS`, `GRAPH_BRIDGE_SUBGRAPH`): hangi deployment'ın standarda
+uyduğu gateway'e sorulmadan doğrulanamaz ve tahmin edilmiş bir id her birim
+testini geçip canlıda patlardı.
+
+İkisi girildiğinde tek komut kapıyı kapatıyor:
+
+```
+pnpm check:graph --slices
+```
+
+ADIM 4 (ENS spike) hâlâ açık.

@@ -20,6 +20,7 @@
  *
  * Run:  pnpm check:graph          (free)
  *       pnpm check:graph --pay    (x402 mode: spends about $0.01)
+ *       pnpm check:graph --slices (runs all five data slices; STEP 19's gate)
  */
 import './load-env.js';
 import {
@@ -29,8 +30,11 @@ import {
   decodeChallenge,
   graphConfigFromEnv,
   GraphGateway,
+  ALL_SLICES,
+  questionTargetsFromEnv,
   quoteFromChallenge,
   readEnv,
+  type QuestionContext,
 } from '@ethonline/graph';
 
 /** Uniswap v3 on Ethereum. Public, heavily indexed, and not ours — a fair probe. */
@@ -166,6 +170,78 @@ async function checkRealQuery(paid: boolean): Promise<void> {
   }
 }
 
+/**
+ * Runs all five slices against the configured subgraphs — the STEP 19 gate.
+ *
+ * The subgraph ids come from `.env` rather than from a constant here. A
+ * Messari deployment id is a fact about someone else's infrastructure, and one
+ * guessed from memory would produce a query that passes every unit test and
+ * fails against the gateway.
+ */
+async function checkSlices(paid: boolean): Promise<void> {
+  console.log('\n4. DATA SLICES\n' + '-'.repeat(70));
+
+  const targets = questionTargetsFromEnv();
+  if (!targets.subgraphId) {
+    console.log('  [SKIP] GRAPH_SUBJECT_SUBGRAPH is not set.');
+    console.log('         Set it, GRAPH_PEER_SUBGRAPHS and GRAPH_BRIDGE_SUBGRAPH to Messari');
+    console.log('         standardized deployment ids, then re-run.');
+    return;
+  }
+
+  let cfg;
+  try {
+    cfg = graphConfigFromEnv();
+  } catch (e) {
+    console.log(`  [SKIP] ${(e as Error).message}`);
+    return;
+  }
+  if (cfg.mode === 'x402' && !paid) {
+    console.log('  [SKIP] Slices in x402 mode cost about $0.01 per query. Re-run with --pay.');
+    return;
+  }
+
+  const gateway = await createGatewayFromEnv();
+  const ctx: QuestionContext = {
+    question: 'Is the growth of this protocol over the last 30 days organic?',
+    subgraphId: targets.subgraphId,
+    peerSubgraphIds: targets.peerSubgraphIds,
+    ...(targets.bridgeSubgraphId ? { bridgeSubgraphId: targets.bridgeSubgraphId } : {}),
+    windowDays: 30,
+  };
+
+  const signalKeys = new Set<string>();
+  let overlap = false;
+
+  for (const slice of ALL_SLICES) {
+    try {
+      const evidence = await slice.fetch(gateway, ctx);
+      const withValues = evidence.signals.filter((s) => s.value !== null).length;
+      step(
+        withValues > 0 || slice.id === 'bridge',
+        `${slice.id}: ${withValues}/${evidence.signals.length} signals resolved, ` +
+          `${evidence.queryCount} quer${evidence.queryCount === 1 ? 'y' : 'ies'}, ` +
+          `$${evidence.queryCostUsd.toFixed(4)}`,
+      );
+      for (const c of evidence.caveats) note(`caveat: ${c.slice(0, 110)}`);
+      // Assumption 4 in practice: two slices computing the same statistic are
+      // one slice with two votes.
+      for (const s of evidence.signals) {
+        if (signalKeys.has(s.key)) {
+          overlap = true;
+          note(`OVERLAP: "${s.key}" is produced by more than one slice`);
+        }
+        signalKeys.add(s.key);
+      }
+    } catch (e) {
+      step(false, `${slice.id} failed`, (e as Error).message.slice(0, 200));
+    }
+  }
+
+  step(!overlap, 'Every slice produces a distinct signal set (Assumption 4)');
+  console.log(`\n  total spend: ${JSON.stringify(gateway.spend)}`);
+}
+
 async function main(): Promise<void> {
   const paid = process.argv.includes('--pay');
   const baseUrl = (readEnv(process.env, 'GRAPH_GATEWAY_URL') ?? 'https://gateway.thegraph.com')
@@ -178,6 +254,7 @@ async function main(): Promise<void> {
   await checkChallenge(baseUrl);
   await checkAuthTrap(baseUrl);
   await checkRealQuery(paid);
+  if (process.argv.includes('--slices')) await checkSlices(paid);
 
   console.log('\n' + '='.repeat(70));
   console.log(failures === 0 ? 'ALL CHECKS PASSED\n' : `${failures} CHECK(S) FAILED\n`);

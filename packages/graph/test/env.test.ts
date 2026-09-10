@@ -8,7 +8,14 @@
  * like a subgraph with no data in it, which is a long way from the truth.
  */
 import { describe, expect, it } from 'vitest';
-import { createGatewayFromEnv, graphConfigFromEnv, parseChain, parseMode, readEnv } from '../src/env.js';
+import {
+  createGatewayFromEnv,
+  graphConfigFromEnv,
+  parseChain,
+  parseMode,
+  questionTargetsFromEnv,
+  readEnv,
+} from '../src/env.js';
 import { DEFAULT_GATEWAY_URL } from '../src/gateway.js';
 
 const KEY = '0x'.padEnd(66, 'a');
@@ -134,5 +141,32 @@ describe('createGatewayFromEnv', () => {
       { listPriceUsd: 0.5, retry: { attempts: 1 } },
     );
     expect(g).toBeDefined();
+  });
+});
+
+describe('questionTargetsFromEnv', () => {
+  it('splits the peer list and trims each entry', () => {
+    const t = questionTargetsFromEnv({
+      GRAPH_SUBJECT_SUBGRAPH: 'subject',
+      GRAPH_PEER_SUBGRAPHS: ' a , b ,c ',
+      GRAPH_BRIDGE_SUBGRAPH: 'bridge',
+    });
+    expect(t.subgraphId).toBe('subject');
+    expect(t.peerSubgraphIds).toEqual(['a', 'b', 'c']);
+    expect(t.bridgeSubgraphId).toBe('bridge');
+  });
+
+  it('drops empty entries left by a trailing comma', () => {
+    const t = questionTargetsFromEnv({ GRAPH_PEER_SUBGRAPHS: 'a,,b,' });
+    expect(t.peerSubgraphIds).toEqual(['a', 'b']);
+  });
+
+  it('returns an empty peer list rather than undefined', () => {
+    // The comparative slice iterates this; undefined would be a crash where
+    // "no peers configured" is a perfectly ordinary state.
+    const t = questionTargetsFromEnv({});
+    expect(t.peerSubgraphIds).toEqual([]);
+    expect(t.subgraphId).toBeUndefined();
+    expect(t.bridgeSubgraphId).toBeUndefined();
   });
 });

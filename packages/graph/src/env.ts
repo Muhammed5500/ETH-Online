@@ -137,3 +137,36 @@ export async function createGatewayFromEnv(
     ...(fetchImpl ? { fetchImpl } : {}),
   });
 }
+
+/**
+ * Which subgraphs a question is about, read from the environment.
+ *
+ * Deliberately configuration and not a constant. A Messari deployment id is a
+ * fact about somebody else's infrastructure that we cannot verify without a
+ * gateway credential, and hardcoding a guess would produce a query that fails
+ * against the real gateway while passing every test here. STEP 21 will pin the
+ * demo's ids once they have actually answered.
+ */
+export interface QuestionTargets {
+  readonly subgraphId?: string;
+  readonly peerSubgraphIds: readonly string[];
+  readonly bridgeSubgraphId?: string;
+}
+
+export function questionTargetsFromEnv(env: NodeJS.ProcessEnv = process.env): QuestionTargets {
+  const peers = readEnv(env, 'GRAPH_PEER_SUBGRAPHS');
+  return {
+    ...(readEnv(env, 'GRAPH_SUBJECT_SUBGRAPH')
+      ? { subgraphId: readEnv(env, 'GRAPH_SUBJECT_SUBGRAPH')! }
+      : {}),
+    peerSubgraphIds: peers
+      ? peers
+          .split(',')
+          .map((s) => s.trim())
+          .filter((s) => s !== '')
+      : [],
+    ...(readEnv(env, 'GRAPH_BRIDGE_SUBGRAPH')
+      ? { bridgeSubgraphId: readEnv(env, 'GRAPH_BRIDGE_SUBGRAPH')! }
+      : {}),
+  };
+}
