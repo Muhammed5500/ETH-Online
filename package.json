@@ -13,7 +13,9 @@
     "test:watch": "vitest",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "kcalc": "tsx scripts/kcalc.ts",
-    "check:hedera": "tsx scripts/check-hedera.ts"
+    "check:hedera": "tsx scripts/check-hedera.ts",
+    "setup:hedera": "tsx scripts/setup-hedera-accounts.ts",
+    "check:accounts": "tsx scripts/check-accounts.ts"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
@@ -24,6 +26,7 @@
   },
   "dependencies": {
     "@ethonline/core": "workspace:*",
-    "@hashgraph/sdk": "^2.81.0"
+    "@hashgraph/sdk": "^2.81.0",
+    "@ethonline/hedera": "workspace:*"
   }
 }

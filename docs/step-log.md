@@ -743,6 +743,141 @@ Proje tarafında **ADIM 4 (SPIKE C, ENSv2 Sepolia) hâlâ açık, ADIM 5 spike
 kapısı hiç çalıştırılmadı.** FAZ 1 bitti, sıradaki adım ADIM 12 ile FAZ 2
 (Hedera). ENS spike'ı artık gerçekten gecikti.
 
+**Kullanıcı kararı (2026-09-10):** ENS spike'ı beklemeye alındı, FAZ 2'ye
+devam. Sıkıntı çıkarsa ENS track'i tamamen düşürülecek. PLAN Bölüm 11 zaten
+ENS'i "kesilebilir tek parça" olarak konumlandırıyordu.
+
+---
+
+## ADIM 12 — Hedera Hesap Altyapısı
+
+- **Tarih:** 2026-09-10
+- **Durum:** GEÇTİ
+- **Test:** 47 yazıldı, 47 geçti (14 env + 12 retry + 21 accounts-file)
+- **Tam suite:** 238/238 yeşil, build temiz
+- **Kanıt:** `pnpm check:accounts` çıktısı — 21 hesap zincirden okundu, hepsi doğru bakiyede
+
+### Zincir üstü sonuç
+
+| | |
+|---|---|
+| Treasury | `0.0.10455276` (100 HBAR) |
+| Agent'lar | `0.0.10455278` – `0.0.10455301`, 20 adet, her biri 10 HBAR |
+| Havuzda kilitli | 300 HBAR |
+| Operatör | 998.2046 → 684.5828 HBAR |
+| Gerçek maliyet | 313.62 HBAR (300 fonlama + 13.62 ücret, hesap başı ~0.65) |
+
+HashScan: https://hashscan.io/testnet/account/0.0.10455276
+
+Tahmin 310.5 HBAR'dı, gerçek 313.62. Hesap başına ayrılan 0.5 HBAR ücret payı
+biraz düşükmüş ama emniyet marjı olarak iş gördü.
+
+### Yazılanlar
+
+`packages/hedera/src/` — `env.ts`, `retry.ts`, `client.ts`, `accounts.ts`,
+`accounts-file.ts`.
+
+`scripts/` — `setup-hedera-accounts.ts`, `check-accounts.ts`, `load-env.ts`.
+
+### Para taşıyan kodun iki savunması
+
+**1. Retry beyaz listesi.** Tehlikeli senaryo "çağrı başarısız oldu" değil,
+**"çağrı zaman aşımına uğradı ve gerçekleşip gerçekleşmediğini bilmiyoruz."**
+O durumda transfer'i körlemesine tekrarlamak iki kez ödeme yapar.
+
+Sadece ağın isteği kesinlikle işlemediği durumlar tekrarlanıyor: `BUSY`,
+`PLATFORM_NOT_ACTIVE`, `PLATFORM_TRANSACTION_NOT_CREATED`, ve transport
+hataları. `INSUFFICIENT_PAYER_BALANCE` veya `INVALID_SIGNATURE` sonsuza kadar
+aynı şekilde başarısız olur, tekrarlamak sadece ücret yakar ve asıl hatayı
+gizler.
+
+**`DUPLICATE_TRANSACTION` özellikle tekrarlanmıyor** — o zaten "ilk deneme
+tuttu" demek.
+
+**Tanınmayan hata kalıcı sayılıyor.** Beyaz liste olması bilinçli: yanlışlıkla
+ödeme tekrarlamanın maliyeti, kurtarılabilir bir hatayı yüzeye çıkarmanın
+maliyetinden çok yüksek.
+
+**2. Donmuş işlem = aynı transaction id.** İşlem ilk denemeden önce
+`freezeWith` ile donduruluyor, retry aynı id'yi taşıyor. İlk deneme aslında
+zincire yazılmışsa retry `DUPLICATE_TRANSACTION` alıyor, ikinci kez para
+göndermiyor. Retry'ı "kullanışlı" olmaktan çıkarıp "güvenli" yapan şey bu.
+
+### Script'in üç operasyonel özelliği
+
+**Idempotent.** `agents/accounts.json` okunuyor ve sadece eksik olan
+oluşturuluyor. Doğrulandı: ikinci koşu "0 agents, ~0.00 HBAR" dedi ve client
+bile açmadı.
+
+**Her hesaptan sonra dosyaya yazıyor**, sonda bir kez değil. Anahtarı
+kaydedilemeyen bir hesap, geri alınamaz şekilde kaybedilmiş HBAR demek.
+19. agent'ta çöken bir koşu ilk 18'in anahtarını götürmemeli.
+
+**`--dry-run`.** Zincire dokunmadan planı ve maliyeti basıyor. Gerçek koşudan
+önce bununla kontrol edildi.
+
+Ayrıca ön kontrol var: operatör bakiyesi yetmiyorsa hiç başlamıyor.
+
+### ROADMAP'ten sapmalar
+
+**1. `accounts.json` düz dizi değil, nesne.** ROADMAP `[{agentId, accountId,
+privateKey}]` gösteriyordu. `version` ve `network` alanları eklendi.
+
+Gerekçe: hesap id'leri ağlar arasında taşınabilir değil. `0.0.1234` hem
+testnet'te hem mainnet'te var ve bambaşka hesaplar. Ağ alanı olmayan bir
+defter yanlış ağa doğrultulduğunda **bir yabancıyı fonlar.**
+`assertNetworkMatches` her yüklemede bunu kontrol ediyor.
+
+**2. `AGENT_COUNT` küçültülürse hesap SİLİNMİYOR.** `missingAgentIds` sadece
+eksiği söylüyor, fazlayı bildirmiyor. Bir env değişkeni değişti diye anahtar
+malzemesi imha etmek kötü bir sürpriz olurdu; kullanılmayan hesabın maliyeti
+sıfır, atılmış özel anahtar geri gelmiyor.
+
+**3. `retry.ts` `client.ts`'ten ayrıldı.** İlk halinde retry mantığı
+client.ts içindeydi ve testler oradan import ediyordu, bu da her koşuda
+`@hashgraph/sdk`'yı yüklüyordu: **`pnpm test` 1.3 sn'den 16.8 sn'ye çıktı.**
+
+ROADMAP test protokolü açıkça "tam suite her adımda çalışacak, saniyeler
+içinde bitmeli" diyor. Retry politikası SDK'ya hiç ihtiyaç duymuyor, ayrı
+modüle alındı ve testler barrel yerine doğrudan modülü import ediyor.
+Süre 2.25 sn'ye döndü.
+
+**4. `scripts/check-accounts.ts` eklendi** (ROADMAP'te yok). Kabul kriteri
+"her hesabın bakiyesi HashScan'de görülebiliyor" idi; tek tek explorer açmak
+yerine 21 hesabı zincirden okuyup defterle karşılaştıran tekrarlanabilir bir
+kapı yazdım. Demo öncesi "havuz hâlâ ödeme yapabilir mi" kontrolü olarak da
+kalıcı değeri var.
+
+**5. `scripts/load-env.ts`.** dotenv tuzağı SPIKE A'da bir kez çözülmüştü ama
+spike'ın içinde kalmıştı. Artık paylaşılan. ADIM 15, 16 ve 21 script'leri de
+bunu kullanacak.
+
+### Tuzaklar
+
+**`setKey` SDK 2.81'de deprecated.** `setKeyWithoutAlias(publicKey)`
+kullanıldı. Alternatifleri de var (`setKeyWithAlias`, `setECDSAKeyWithAlias`)
+ama EVM alias'ına şu an ihtiyaç yok; x402 Hedera signer'ı hesap id + anahtar
+ile çalışıyor (SPIKE A'da doğrulanmıştı). `evmAddress` yine de public
+key'den türetilip deftere yazılıyor, ileride lazım olursa duruyor.
+
+**Scratchpad'ten workspace paketi import edilemiyor.** Doğrulama script'ini
+önce geçici klasöre yazdım, `@ethonline/hedera` çözülemedi
+(`MODULE_NOT_FOUND`) çünkü klasör repo ağacının dışında. Zaten kalıcı olması
+daha doğruydu, `scripts/check-accounts.ts` oldu.
+
+**Anahtar tipi ECDSA.** Operatörle aynı. Ön uçuş kontrolünde `fromString`'in
+ECDSA/ED25519 ayrımında sessizce yanlış tahmin edebildiği görülmüştü; her
+yerde açıkça `fromStringECDSA` kullanılıyor.
+
+### Kalan risk
+
+`agents/accounts.json` 20 özel anahtar taşıyor ve gitignore'da olduğu
+doğrulandı (`git check-ignore` ve `git status` ile). Dosya kaybolursa 300
+HBAR geri alınamaz. Testnet olduğu için kritik değil ama ADIM 21'de agent'lar
+bu anahtarlarla imza atacak, dosya yedeklenmeli.
+
+ADIM 4 (ENS spike) hâlâ açık, kullanıcı kararıyla ertelendi.
+
 ### ROADMAP'ten sapmalar
 
 **1. `poolExhaustionProbability` ve `flatFeeProbability` kopyalanmadı.**
