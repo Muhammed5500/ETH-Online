@@ -66,7 +66,22 @@ export interface ReportRequest {
 export interface AgentReportResponse {
   readonly probability: number;
   readonly signature: string;
+  /**
+   * Why the agent landed where it did, in its own words.
+   *
+   * NOT SIGNED, and deliberately so. The signature covers the probability,
+   * which is the only thing the mechanism scores; letting prose into the
+   * signed payload would put an unbounded string on the critical path for no
+   * gain. It is displayed as what it is — an agent's account of itself, useful
+   * to a reader and worth nothing as proof.
+   */
   readonly reasoning?: string;
+  /** Which data slices it looked at (STEP 19). */
+  readonly sliceIds?: readonly string[];
+  /** What its evidence cost it, in USD. The Graph charges per query. */
+  readonly evidenceCostUsd?: number;
+  /** `sha256:...` over the evidence, so a claim can be tied to what produced it. */
+  readonly evidenceDigest?: string;
 }
 
 /** How the orchestrator reaches an agent. Injected so rounds can run offline. */
@@ -221,6 +236,20 @@ export class Orchestrator {
 
     const report = market.submitReport(agentId, rawBelief);
 
+    // Everything the mechanism does not need but a reader does. Kept beside
+    // the market rather than inside `core`, which stays free of anything that
+    // is not the mechanism itself.
+    stored.annotations.set(report.position, {
+      position: report.position,
+      agentId,
+      ...(response.reasoning ? { reasoning: response.reasoning } : {}),
+      ...(response.sliceIds ? { sliceIds: [...response.sliceIds] } : {}),
+      ...(typeof response.evidenceCostUsd === 'number'
+        ? { evidenceCostUsd: response.evidenceCostUsd }
+        : {}),
+      ...(response.evidenceDigest ? { evidenceDigest: response.evidenceDigest } : {}),
+    });
+
     const appended = await this.deps.ledger.append(stored.topicId, {
       v: 1,
       type: 'report',
@@ -230,6 +259,9 @@ export class Orchestrator {
       agentId,
       belief: report.belief,
       rawBelief: report.rawBelief,
+      // On the record when the agent supplied one: it ties the number to the
+      // evidence that produced it, and anyone can check the digest later.
+      ...(response.evidenceDigest ? { evidenceDigest: response.evidenceDigest } : {}),
     });
 
     // The new hash first, THEN the dice. Reversing these two lines would make

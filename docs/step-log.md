@@ -2170,3 +2170,123 @@ pnpm demo
 ```
 
 ADIM 4 (ENS spike) hâlâ açık.
+
+---
+
+## ADIM 28 — Canlı Market Sayfası
+
+- **Tarih:** 2026-09-10
+- **Durum:** KISMEN GEÇTİ — sayfa, grafik, rapor akışı ve kapanış paneli bitti;
+  **görsel doğrulama yapılamadı** (Chrome eklentisi bağlı değil).
+- **Test:** 21 yazıldı (13 API ucu + 8 grafik serisi), 21 geçti
+- **Tam suite:** 624/624 yeşil (3.88 sn), `pnpm -r build` temiz
+
+### Sayfanın istediği üç şey API'de yoktu
+
+ROADMAP rapor kartında gerekçe, veri dilimi rozeti ve kanıt maliyeti istiyor;
+kapanış panelinde de "durma kararının doğrulanabilir hash'i". Üçü de yoktu.
+
+**1. Rapor açıklamaları (`ReportAnnotation`).** `core`'daki `Report` pozisyon,
+inanç ve kırpmadan ibaret — mekanizmanın skorladığı her şey bu ve paket saf
+kalmalı. Gerekçe/dilim/maliyet API katmanında, market'in yanında duruyor.
+
+`AgentReportResponse` genişletildi: `reasoning`, `sliceIds`, `evidenceCostUsd`,
+`evidenceDigest`. ADIM 20'nin gerçek agent'ı da aynı üç şeyi raporlayacak, yani
+sayfa alacağı şekle karşı yazıldı.
+
+**Gerekçe imzalanmıyor, bilinçli.** İmza olasılığı kapsıyor, çünkü mekanizmanın
+skorladığı tek şey o. Serbest metni imzalı yüke sokmak, kritik yola sınırsız bir
+string koymak demek ve karşılığında hiçbir şey vermiyor. Ekranda da böyle
+etiketleniyor: agent'ın kendisi hakkındaki beyanı, kanıt değil.
+
+**`evidenceDigest` ise HCS kaydına yazılıyor.** Hash sonradan doğrulanabilir,
+düzyazı doğrulanamaz. ADIM 13'te "STEP 20'ye kadar opsiyonel" diye bırakılan
+alan böylece bağlandı.
+
+**2. `GET /market/:id/randomness`.** Mekanizmanın dürüstlüğü durma zamanının
+tahmin edilemez olmasına dayanıyor ve bizimkine inanmanın tek sebebi, her zarın
+ağ üzerinde uzlaşılana kadar var olmayan bir mesajın running hash'inden gelmesi.
+Bu iddia doğrulanabilir — hash'ler mirror node'da açık — ama sadece hangi
+hash'in neye karar verdiğini söylersek.
+
+Uç şunu döndürüyor: her zar için hash, çıkan değer, amaç (`stop`/`draw`), ve
+durma zarları için α ile karşılaştırma sonucu. Artı `howToVerify`: hangi bayt
+aralığı, hangi sıra, kaç bit.
+
+**SADECE GEÇMİŞ YAYINLANIYOR.** Bir zar, o pozisyondaki rapor var olduğunda
+yayınlanıyor. Çekilmiş ama henüz rapor vermemiş agent'ın zarı gizli — onu
+yayınlamak sırada kimin olduğunu söylerdi ve çekilişin tur tur yapılmasının
+sebebi tam olarak sıranın önceden bilinememesi (PLAN 6.4). Bunun testi
+`market-detail.test.ts` içinde ve dosyanın yük taşıyan testi o.
+
+### Grafiğin şekliyle iddia ettiği iki şey
+
+**Çizgi açılış fiyatından başlıyor**, ilk rapordan değil. Skorlama kuralı
+**hareketi** ödüyor ve ilk agent'ın hareketi prior'dan. 1. rapordan başlayan bir
+grafik, çoğu marketin yaptığı en büyük hareketi gizlerdi.
+
+**Referans sadece kapanmış markette işaretleniyor.** Market koşarken son rapor
+yalnızca en yenisi; onu cevap diye işaretlemek market'in çözüldüğünü iddia
+etmek olurdu. Herkesin ödemesi referansa göre hesaplandığı için bu kozmetik
+değil.
+
+Ayrıca y ekseni [0,1]'e sabitlendi. Recharts kendi haline bırakılsa 0.68–0.74
+aralığına zoom yapıp sıkıcı bir marketi dramatik gösterirdi. Yakınsamış bir
+marketin düzlüğü bilgidir.
+
+### Test hızı: recharts'ı birim suite'ten çıkardım
+
+`buildSeries` önce bileşenin içindeydi ve testi recharts'ı çekiyordu — toplama
+süresi **28 saniye**. ROADMAP'in kuralı açık: `pnpm test` saniyeler içinde
+bitmeli. Saf seri mantığı `lib/series.ts`'e taşındı, süre **2.2 saniyeye**
+indi. Zaten render hakkında hiçbir fikri olmayan aritmetiğin bileşen dosyasında
+işi yoktu.
+
+### Demo agent'ları artık gerekçe üretiyor
+
+Rapor akışının işi, agent'ların **farklı kanıta baktıkları için** ayrıştığını
+göstermek — Varsayım 4'ün görünür hali. Demo transport'u her agent'ın diliminin
+diline uygun bir cümle üretiyor ve dilim rozetiyle birlikte gösteriliyor.
+Yalancı agent'ın gerekçesi de dürüst: "bunu okudum, yine de tersini
+raporluyorum."
+
+### Kabul kriterleri
+
+| Kriter | Durum |
+|---|---|
+| Grafik canlı güncelleniyor | EVET (2 sn polling, terminal durumda duruyor) |
+| Raporlar geldikçe akışa ekleniyor | EVET |
+| HCS linkleri çalışıyor | EVET (HashScan, topic id) |
+| Kapanışta referans agent net işaretli | EVET (grafikte, akışta, panelde) |
+| **Ekranın gerçekten doğru göründüğü** | **DOĞRULANMADI** |
+
+### Kanıt
+
+```
+GET /market/mkt-2026-09-10-006/reports
+  prior       [0.5, 0.5]
+  position    1  agent-18
+  prev->new   0.5 -> 0.71
+  slices      ['activity']
+  cost        0.01
+  reasoning   On the activity slice, swap inter-arrival times are unusually...
+
+GET /market/mkt-2026-09-10-006/randomness
+  alpha         0.125
+  draws         38
+  pendingHidden False
+  CLOSING ROLL  pos 19  value 0.083094936 < alpha 0.125
+    hash        1545b5b07c86e03256b7bbad3bba9c7b8299fc857e0b16b6...
+```
+
+### Kalan iş
+
+Görsel doğrulama duruyor. `pnpm demo` ile sunucu ayakta, sayfa
+`http://127.0.0.1:4021/m/<marketId>` adresinde. Grafiğin gerçekten okunur
+olduğu, rapor kartlarının sığdığı ve kapanış panelinin anlaşıldığı göze
+bakılmadan bilinemez.
+
+Bundle 650 kB (gzip 196 kB) — recharts'ın payı büyük. Demo için kabul
+edilebilir; sıkıntı olursa grafik dinamik import'a alınabilir.
+
+ADIM 4 (ENS spike) hâlâ açık.

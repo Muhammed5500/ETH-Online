@@ -281,6 +281,7 @@ export function createApp(deps: AppDeps): Api {
           createdAt: now(),
           bondingClosesAt: now() + config.bondingWindowMs,
           bonds: new Map(),
+          annotations: new Map(),
         });
 
         return void res.status(201).json({
@@ -410,6 +411,24 @@ export function createApp(deps: AppDeps): Api {
         return fail(res, 409, 'Report rejected', (e as Error).message);
       }
 
+      // Display-only, and outside the signature on purpose: the signature
+      // covers the probability, which is the only thing scored. An agent that
+      // lies here misleads a reader; it cannot move a payout.
+      const evidenceDigest =
+        typeof body['evidenceDigest'] === 'string' ? body['evidenceDigest'] : undefined;
+      stored.annotations.set(report.position, {
+        position: report.position,
+        agentId,
+        ...(typeof body['reasoning'] === 'string' ? { reasoning: body['reasoning'] } : {}),
+        ...(Array.isArray(body['sliceIds'])
+          ? { sliceIds: body['sliceIds'].filter((x): x is string => typeof x === 'string') }
+          : {}),
+        ...(typeof body['evidenceCostUsd'] === 'number'
+          ? { evidenceCostUsd: body['evidenceCostUsd'] }
+          : {}),
+        ...(evidenceDigest ? { evidenceDigest } : {}),
+      });
+
       try {
         const appended = await deps.ledger.append(stored.topicId, {
           v: 1,
@@ -420,6 +439,7 @@ export function createApp(deps: AppDeps): Api {
           agentId,
           belief: report.belief,
           rawBelief: report.rawBelief,
+          ...(evidenceDigest ? { evidenceDigest } : {}),
         });
         // Feeds the next draw and the stopping roll. The roll itself belongs
         // to the orchestrator, which knows the round is complete (STEP 16).
@@ -454,18 +474,89 @@ export function createApp(deps: AppDeps): Api {
     const stored = markets.get(String(req.params['id']));
     if (!stored) return fail(res, 404, 'No such market');
     const state = stored.market.getState();
-    return void res.json({
-      marketId: stored.id,
-      topicId: stored.topicId,
-      reports: state.reports.map((r) => ({
+    let previous = stored.prior;
+    const reports = state.reports.map((r) => {
+      const annotation = stored.annotations.get(r.position);
+      const row = {
         position: r.position,
         agentId: r.agentId,
         belief: r.belief,
         rawBelief: r.rawBelief,
+        // Where the price was before this agent moved it. The scoring rule
+        // pays for the MOVE, not the level, so a report only means anything
+        // next to the one before it.
+        previousBelief: previous,
+        clipped: r.belief[1] !== r.rawBelief[1],
         timestamp: r.timestamp,
-      })),
+        ...(annotation?.reasoning ? { reasoning: annotation.reasoning } : {}),
+        ...(annotation?.sliceIds ? { sliceIds: annotation.sliceIds } : {}),
+        ...(typeof annotation?.evidenceCostUsd === 'number'
+          ? { evidenceCostUsd: annotation.evidenceCostUsd }
+          : {}),
+        ...(annotation?.evidenceDigest ? { evidenceDigest: annotation.evidenceDigest } : {}),
+      };
+      previous = r.belief;
+      return row;
+    });
+
+    return void res.json({
+      marketId: stored.id,
+      topicId: stored.topicId,
+      prior: stored.prior,
+      reports,
       // Anyone can recompute all of this from the topic without trusting us.
       verifyVia: `${stored.topicId}`,
+    });
+  });
+
+  /**
+   * The randomness behind the decisions already made.
+   *
+   * WHY THIS IS WORTH AN ENDPOINT. The mechanism's honesty rests on the
+   * stopping time being unpredictable, and the only reason to believe ours is
+   * that each roll comes from the running hash of a message that did not exist
+   * until the network agreed on it. That claim is checkable — the hashes are
+   * public on the mirror node — but only if we say which hash decided what.
+   *
+   * ONLY THE PAST. A draw is published once the report at that position
+   * exists. The draw for an agent that has been picked but has not reported
+   * yet stays hidden, because publishing it alongside the pool would say who
+   * is about to speak; the whole reason the draw is lazy is that nobody may
+   * learn the order in advance (PLAN section 6.4).
+   */
+  app.get('/market/:id/randomness', (req, res) => {
+    const stored = markets.get(String(req.params['id']));
+    if (!stored) return fail(res, 404, 'No such market');
+    const state = stored.market.getState();
+    const settledPositions = state.reports.length;
+
+    const positionOf = (label: string): number => Number(label.split('-')[1] ?? '0');
+
+    const draws = stored.rng.draws
+      .filter((d) => positionOf(d.label) <= settledPositions)
+      .map((d) => ({
+        label: d.label,
+        purpose: d.purpose,
+        position: positionOf(d.label),
+        runningHash: d.runningHashHex,
+        value: d.value,
+        // A stopping roll closes the market when it lands below alpha. Stated
+        // per draw so a reader can check the comparison, not just trust it.
+        ...(d.purpose === 'stop'
+          ? { alpha: stored.params.alpha, stopped: d.value < stored.params.alpha }
+          : {}),
+      }));
+
+    return void res.json({
+      marketId: stored.id,
+      topicId: stored.topicId,
+      alpha: stored.params.alpha,
+      draws,
+      pendingHidden: stored.rng.draws.length > draws.length,
+      howToVerify:
+        'Each running hash is public on the mirror node. Take the 8 bytes at offset 0 for a ' +
+        'stopping roll (offset 8 for a draw), read them big-endian, keep the top 53 bits and ' +
+        'divide by 2^53. A stopping roll below alpha closed the market.',
     });
   });
 

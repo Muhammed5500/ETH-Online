@@ -32,6 +32,28 @@ export interface RegisteredAgent {
   readonly registeredAt: number;
 }
 
+/**
+ * What an agent said about its own report, beside the report itself.
+ *
+ * `core` holds a report as a position, a belief and a clip. That is all the
+ * mechanism scores and all it should ever hold — the package is pure and stays
+ * that way. But a reader looking at a market wants to know what the agent was
+ * looking at and what it paid to look, and that belongs somewhere. Here.
+ *
+ * None of it is signed and none of it is scored. It is an agent's account of
+ * itself: useful to a person, worthless as proof. The one exception is
+ * `evidenceDigest`, which does go on the HCS record, because a hash of the
+ * evidence can be checked afterwards and prose cannot.
+ */
+export interface ReportAnnotation {
+  readonly position: number;
+  readonly agentId: string;
+  readonly reasoning?: string;
+  readonly sliceIds?: readonly string[];
+  readonly evidenceCostUsd?: number;
+  readonly evidenceDigest?: string;
+}
+
 export interface BondRecord {
   readonly agentId: string;
   readonly accountId: string;
@@ -54,6 +76,8 @@ export interface StoredMarket {
   readonly createdAt: number;
   readonly bondingClosesAt: number;
   readonly bonds: Map<string, BondRecord>;
+  /** Position to what the agent said about that report. Display only. */
+  readonly annotations: Map<number, ReportAnnotation>;
   /**
    * Set on the first settlement attempt, then never recomputed.
    *

@@ -126,9 +126,43 @@ function demoTransport(agents: readonly DemoAgent[], liar?: string): AgentTransp
           position: req.position,
           belief: [1 - p, p],
         }),
+        // Display-only, but not filler: STEP 20's real agent reports the same
+        // three things, so the page is built against the shape it will get.
+        reasoning: reasonFor(demo, running, p, liar === agent.agentId),
+        sliceIds: [...demo.sliceIds],
+        evidenceCostUsd: demo.sliceIds.length * 0.01,
       };
     },
   };
+}
+
+/**
+ * A sentence in the voice of whichever slice the agent looked at.
+ *
+ * Not a decoration. The report feed's job is to show that agents disagree
+ * because they are looking at DIFFERENT evidence — that is Assumption 4 made
+ * visible — so the text has to name the slice and say something a reader can
+ * connect to the number beside it.
+ */
+function reasonFor(agent: DemoAgent, before: number, after: number, lying: boolean): string {
+  const slice = agent.sliceIds[0] ?? 'liquidity';
+  const findings: Record<string, string> = {
+    liquidity:
+      'the top pool holds most of the TVL and turns over several times its own depth each day',
+    holders:
+      'deposits cluster into a handful of addresses, and most depositors appear exactly once',
+    activity:
+      'swap inter-arrival times are unusually regular and a large share have the same address on both sides',
+    bridge:
+      'inflow and outflow are close to balanced, so capital arrives, is counted, and leaves',
+    comparative:
+      'turnover ranks above every peer while revenue yield ranks below all of them',
+  };
+  const direction =
+    after > before ? 'pushing the price up' : after < before ? 'pulling it down' : 'holding steady';
+  return lying
+    ? `Reading the ${slice} slice, ${findings[slice]}. Reporting against it anyway.`
+    : `On the ${slice} slice, ${findings[slice]}. ${direction[0]!.toUpperCase()}${direction.slice(1)} from ${(before * 100).toFixed(1)}%.`;
 }
 
 /** Records transfers instead of sending them. */

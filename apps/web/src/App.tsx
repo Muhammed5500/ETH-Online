@@ -17,6 +17,7 @@ import type { ReactNode } from 'react';
 import { Link, Route, Routes } from 'react-router-dom';
 import { MarketList } from './pages/MarketList.tsx';
 import { NewMarket } from './pages/NewMarket.tsx';
+import { Market } from './pages/Market.tsx';
 import { NavLinkish } from './components/ui.tsx';
 
 function NotFound(): ReactNode {
@@ -64,7 +65,7 @@ export function App(): ReactNode {
         <Routes>
           <Route path="/" element={<MarketList />} />
           <Route path="/new" element={<NewMarket />} />
-          <Route path="/m/:id" element={<Placeholder step="STEP 28" title="Live market page" />} />
+          <Route path="/m/:id" element={<Market />} />
           <Route
             path="/directory"
             element={<Placeholder step="STEP 29" title="Agent directory" />}

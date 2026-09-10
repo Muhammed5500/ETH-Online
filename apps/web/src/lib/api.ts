@@ -53,13 +53,44 @@ export interface ReportView {
   readonly agentId: string;
   readonly belief: Belief;
   readonly rawBelief: Belief;
+  /** Where the price stood before this agent moved it. */
+  readonly previousBelief: Belief;
+  /** The protocol had to pull the report back inside what the bond carries. */
+  readonly clipped: boolean;
   readonly timestamp: number;
+  /** The agent's own account of itself. Not signed, not scored. */
+  readonly reasoning?: string;
+  readonly sliceIds?: readonly string[];
+  readonly evidenceCostUsd?: number;
+  readonly evidenceDigest?: string;
 }
 
 export interface ReportsResponse {
   readonly marketId: string;
   readonly topicId: string;
+  readonly prior: Belief;
   readonly reports: readonly ReportView[];
+}
+
+/** One value pulled out of a running hash, with everything needed to recheck it. */
+export interface RandomnessDrawView {
+  readonly label: string;
+  readonly purpose: 'stop' | 'draw';
+  readonly position: number;
+  readonly runningHash: string;
+  readonly value: number;
+  readonly alpha?: number;
+  readonly stopped?: boolean;
+}
+
+export interface RandomnessResponse {
+  readonly marketId: string;
+  readonly topicId: string;
+  readonly alpha: number;
+  readonly draws: readonly RandomnessDrawView[];
+  /** A draw exists that is deliberately not published: an agent has not reported yet. */
+  readonly pendingHidden: boolean;
+  readonly howToVerify: string;
 }
 
 export interface AgentView {
@@ -144,6 +175,8 @@ export const api = {
   markets: () => request<{ markets: MarketView[]; count: number }>('/markets'),
   market: (id: string) => request<MarketView>(`/market/${encodeURIComponent(id)}`),
   reports: (id: string) => request<ReportsResponse>(`/market/${encodeURIComponent(id)}/reports`),
+  randomness: (id: string) =>
+    request<RandomnessResponse>(`/market/${encodeURIComponent(id)}/randomness`),
   agents: () => request<{ agents: AgentView[]; count: number }>('/agents'),
   health: () => request<{ ok: boolean; network: string; markets: number; agents: number }>('/health'),
 

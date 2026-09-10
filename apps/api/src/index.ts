@@ -49,6 +49,7 @@ export {
   nextMarketId,
   type BondRecord,
   type RegisteredAgent,
+  type ReportAnnotation,
   type StoredMarket,
 } from './store.js';
 
