@@ -93,6 +93,74 @@ export interface RandomnessResponse {
   readonly howToVerify: string;
 }
 
+export interface PayoutView {
+  readonly agentId: string;
+  readonly position: number;
+  readonly kind: 'scored' | 'flat-fee';
+  /** In mechanism units. Negative for an agent that moved the price the wrong way. */
+  readonly amount: number;
+  /** The unscaled S_CEM value. Absent for a flat fee, which has no score behind it. */
+  readonly scoreRaw?: number;
+}
+
+export interface TransferView {
+  readonly beneficiary: string;
+  readonly accountId: string;
+  readonly kind: 'scored' | 'flat-fee' | 'not-drawn' | 'timed-out' | 'asker';
+  readonly amountTinybar: string;
+  readonly bondReturnedTinybar: string;
+  readonly payoutTinybar: string;
+  readonly chunkIndex?: number;
+  readonly chunkState?: 'pending' | 'sent' | 'unknown';
+  readonly transactionId?: string;
+}
+
+/** The §6.2 claim, as two numbers a reader can compare. */
+export interface BoundView {
+  readonly maxScoringUnits: number;
+  readonly actualScoringUnits: number;
+  readonly flatFeeUnits: number;
+  readonly requiredDepositUnits: number;
+  readonly withinBound: boolean;
+  readonly maxScoringTinybar: string;
+}
+
+export interface SettlementView {
+  readonly marketId: string;
+  readonly status: 'not-settled' | 'in-progress' | 'complete' | 'blocked';
+  readonly marketStatus: MarketStatus;
+  readonly topicId?: string;
+  readonly reference?: Belief;
+  readonly payouts?: readonly PayoutView[];
+  readonly totals?: {
+    readonly deposit: number;
+    readonly totalBonds: number;
+    readonly scoreTotal: number;
+    readonly bondsReturned: number;
+    readonly timeoutSlash: number;
+    readonly scoreSlash: number;
+    readonly totalToAgents: number;
+    readonly askerRefund: number;
+  };
+  readonly bound?: BoundView;
+  readonly transfers?: readonly TransferView[];
+  readonly accounting?: {
+    readonly inTinybar: string;
+    readonly outTinybar: string;
+    readonly paidToAgentsTinybar: string;
+    readonly askerRefundTinybar: string;
+    readonly slashedTinybar: string;
+    readonly balances: boolean;
+  };
+  readonly progress?: {
+    readonly chunks: number;
+    readonly sent: number;
+    readonly pending: number;
+    readonly unknown: number;
+    readonly blocked: boolean;
+  };
+}
+
 export interface AgentView {
   readonly agentId: string;
   readonly accountId: string;
@@ -177,6 +245,8 @@ export const api = {
   reports: (id: string) => request<ReportsResponse>(`/market/${encodeURIComponent(id)}/reports`),
   randomness: (id: string) =>
     request<RandomnessResponse>(`/market/${encodeURIComponent(id)}/randomness`),
+  settlement: (id: string) =>
+    request<SettlementView>(`/market/${encodeURIComponent(id)}/settlement`),
   agents: () => request<{ agents: AgentView[]; count: number }>('/agents'),
   health: () => request<{ ok: boolean; network: string; markets: number; agents: number }>('/health'),
 

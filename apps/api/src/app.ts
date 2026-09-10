@@ -34,14 +34,17 @@ import {
   beliefFromProbability,
   DEFAULT_PARAMS,
   Market,
+  maxTotalPayout,
   normalizeBelief,
+  requiredDeposit,
   UNIFORM_PRIOR,
   type Belief,
   type MarketParams,
 } from '@ethonline/core';
 import { HcsRandomSource, type HcsMessage, type HederaNetwork } from '@ethonline/hedera';
 import type { Ledger } from './ledger.js';
-import { bondTinybar, depositTinybar, DEFAULT_HBAR_PER_UNIT } from './pricing.js';
+import { bondTinybar, depositTinybar, DEFAULT_HBAR_PER_UNIT, unitsToTinybar } from './pricing.js';
+import { summarize } from './settlement-progress.js';
 import { verifyReportSignature } from './signatures.js';
 import {
   AgentRegistry,
@@ -159,6 +162,12 @@ export function publicMarketView(m: StoredMarket): Record<string, unknown> {
     createdAt: m.createdAt,
     bondingClosesAt: m.bondingClosesAt,
   };
+}
+
+
+/** What the asker gets back, in tinybar. Zero if the plan has no asker line. */
+function askerLine(plan: { lines: readonly { beneficiary: string; amountTinybar: bigint }[] }): bigint {
+  return plan.lines.find((l) => l.beneficiary === 'asker')?.amountTinybar ?? 0n;
 }
 
 // -------------------------------------------------------------------- the app
@@ -557,6 +566,148 @@ export function createApp(deps: AppDeps): Api {
         'Each running hash is public on the mirror node. Take the 8 bytes at offset 0 for a ' +
         'stopping roll (offset 8 for a draw), read them big-endian, keep the top 53 bits and ' +
         'divide by 2^53. A stopping roll below alpha closed the market.',
+    });
+  });
+
+  /**
+   * Where the money went, and the proof it could not have been more.
+   *
+   * THE BUDGET BOUND IS THE POINT. The paper's §6.2 telescoping argument says
+   * the asker's whole CE-MSR subsidy is capped at `b·H(r, q⁰)` no matter how
+   * long the market runs or how wildly the price moves — the intermediate
+   * terms cancel. That is the claim that makes it safe to open a market at
+   * all, and it is checkable: the cap and what was actually paid are both
+   * numbers, and this endpoint publishes both.
+   *
+   * ALWAYS 200 FOR A MARKET THAT EXISTS. A page polling this while a market is
+   * still running should learn that it has not settled, not collect 404s.
+   */
+  app.get('/market/:id/settlement', (req, res) => {
+    const stored = markets.get(String(req.params['id']));
+    if (!stored) return fail(res, 404, 'No such market');
+
+    const state = stored.market.getState();
+    const progress = stored.settlementProgress;
+
+    if (!progress) {
+      return void res.json({
+        marketId: stored.id,
+        status: 'not-settled',
+        marketStatus: state.status,
+      });
+    }
+
+    const { settlement, plan } = progress;
+    const summary = summarize(progress);
+
+    // Chunk index per beneficiary, so a line can be tied to the transaction
+    // that actually carried it.
+    const chunkOf = new Map<string, { index: number; transactionId?: string; state: string }>();
+    for (const chunk of progress.chunks) {
+      for (const line of chunk.lines) {
+        chunkOf.set(line.beneficiary, {
+          index: chunk.index,
+          ...(chunk.transactionId ? { transactionId: chunk.transactionId } : {}),
+          state: chunk.state,
+        });
+      }
+    }
+
+    const scoredTotal = settlement.payouts
+      .filter((p) => p.kind === 'scored')
+      .reduce((sum, p) => sum + p.amount, 0);
+
+    // Referenced-in bound when the market closed; the referenceless worst case
+    // otherwise. Both are real caps — the second is just looser.
+    const boundUnits = settlement.reference
+      ? maxTotalPayout(stored.params.b, stored.prior, settlement.reference)
+      : maxTotalPayout(stored.params.b, stored.prior);
+
+    const inTinybar = plan.totalInTinybar;
+    const outTinybar = plan.totalOutTinybar + plan.slashedTinybar;
+
+    return void res.json({
+      marketId: stored.id,
+      status: summary.complete ? 'complete' : summary.blocked ? 'blocked' : 'in-progress',
+      marketStatus: state.status,
+      topicId: stored.topicId,
+      ...(settlement.reference ? { reference: settlement.reference } : {}),
+
+      payouts: settlement.payouts.map((p) => ({
+        agentId: p.agentId,
+        position: p.position,
+        kind: p.kind,
+        amount: p.amount,
+        ...(typeof p.scoreRaw === 'number' ? { scoreRaw: p.scoreRaw } : {}),
+      })),
+
+      totals: {
+        deposit: settlement.deposit,
+        totalBonds: settlement.totalBonds,
+        scoreTotal: settlement.scoreTotal,
+        bondsReturned: settlement.bondsReturned,
+        timeoutSlash: settlement.timeoutSlash,
+        scoreSlash: settlement.scoreSlash,
+        totalToAgents: settlement.totalToAgents,
+        askerRefund: settlement.askerRefund,
+      },
+
+      /**
+       * The cap, what was spent against it, and the deposit that had to cover
+       * both it and the flat fees.
+       */
+      bound: {
+        maxScoringUnits: boundUnits,
+        actualScoringUnits: scoredTotal,
+        flatFeeUnits: settlement.payouts.filter((p) => p.kind === 'flat-fee').length * stored.params.R,
+        requiredDepositUnits: requiredDeposit(stored.params, stored.prior),
+        withinBound: scoredTotal <= boundUnits + 1e-9,
+        maxScoringTinybar: unitsToTinybar(Math.max(0, boundUnits), config.hbarPerUnit).toString(),
+      },
+
+      transfers: plan.lines.map((l) => {
+        const chunk = chunkOf.get(l.beneficiary);
+        return {
+          beneficiary: l.beneficiary,
+          accountId: l.accountId,
+          kind: l.kind,
+          amountTinybar: l.amountTinybar.toString(),
+          bondReturnedTinybar: l.bondReturnedTinybar.toString(),
+          payoutTinybar: l.payoutTinybar.toString(),
+          ...(chunk
+            ? {
+                chunkIndex: chunk.index,
+                chunkState: chunk.state,
+                ...(chunk.transactionId ? { transactionId: chunk.transactionId } : {}),
+              }
+            : {}),
+        };
+      }),
+
+      /**
+       * The accounting identity, computed here rather than asserted.
+       *
+       * `deposit + Σ bonds` must equal `Σ transfers + slashed`. It is checked
+       * in `core` before a plan is built and again before it is executed; this
+       * publishes the arithmetic so a reader can add it up themselves instead
+       * of taking a green tick on faith.
+       */
+      accounting: {
+        inTinybar: inTinybar.toString(),
+        outTinybar: outTinybar.toString(),
+        paidToAgentsTinybar: (plan.totalOutTinybar - askerLine(plan)).toString(),
+        askerRefundTinybar: askerLine(plan).toString(),
+        slashedTinybar: plan.slashedTinybar.toString(),
+        balances: inTinybar === outTinybar,
+      },
+
+      progress: {
+        chunks: summary.total,
+        sent: summary.sent,
+        pending: summary.pending,
+        unknown: summary.unknown,
+        blocked: summary.blocked,
+      },
     });
   });
 

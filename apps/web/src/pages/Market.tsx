@@ -27,6 +27,7 @@ import {
 import { expectedLength, formatHbar, percent, poolExhaustionRisk, relativeTime } from '../lib/format.ts';
 import { isTerminal, usePolling } from '../lib/usePolling.ts';
 import { PriceChart } from '../components/PriceChart.tsx';
+import { Settlement } from '../components/Settlement.tsx';
 import { Empty, ErrorBox, Field, Panel, SliceBadge, Spinner, StatusBadge } from '../components/ui.tsx';
 
 const NETWORK = 'testnet';
@@ -136,6 +137,29 @@ function ReportCard({
   );
 }
 
+function TabButton({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: ReactNode;
+}): ReactNode {
+  return (
+    <button
+      onClick={onClick}
+      className={`-mb-px border-b-2 px-3 py-2 text-sm transition ${
+        active
+          ? 'border-slate-200 text-slate-100'
+          : 'border-transparent text-slate-500 hover:text-slate-300'
+      }`}
+    >
+      {children}
+    </button>
+  );
+}
+
 function ClosingPanel({
   market,
   randomness,
@@ -215,6 +239,12 @@ export function Market(): ReactNode {
     intervalMs: 3000,
     enabled: !done,
   });
+  const settlement = usePolling(() => api.settlement(id), [id], {
+    intervalMs: 3000,
+    enabled: !done,
+  });
+
+  const [tab, setTab] = useState<'reports' | 'settlement'>('reports');
 
   if (market.loading && !market.settled) return <Spinner label="Loading market" />;
   if (market.error && !market.data) {
@@ -266,25 +296,43 @@ export function Market(): ReactNode {
             </p>
           </Panel>
 
-          <Panel title={`Reports — ${rows.length}`}>
-            {rows.length === 0 ? (
-              <Empty>
-                {m.status === 'bonding'
-                  ? 'Agents are still posting bonds. Nobody has reported yet.'
-                  : 'No reports yet.'}
-              </Empty>
+          <div>
+            <div className="mb-3 flex gap-1 border-b border-[var(--color-edge)]">
+              <TabButton active={tab === 'reports'} onClick={() => setTab('reports')}>
+                Reports {rows.length > 0 && <span className="tnum">({rows.length})</span>}
+              </TabButton>
+              <TabButton active={tab === 'settlement'} onClick={() => setTab('settlement')}>
+                Settlement
+                {settlement.data?.status === 'blocked' && (
+                  <span className="ml-1.5 inline-block h-1.5 w-1.5 rounded-full bg-amber-400 align-middle" />
+                )}
+              </TabButton>
+            </div>
+
+            {tab === 'reports' ? (
+              <Panel>
+                {rows.length === 0 ? (
+                  <Empty>
+                    {m.status === 'bonding'
+                      ? 'Agents are still posting bonds. Nobody has reported yet.'
+                      : 'No reports yet.'}
+                  </Empty>
+                ) : (
+                  <ul className="space-y-2">
+                    {[...rows].reverse().map((r) => (
+                      <ReportCard
+                        key={r.position}
+                        report={r}
+                        isReference={isClosed && r.position === lastPosition}
+                      />
+                    ))}
+                  </ul>
+                )}
+              </Panel>
             ) : (
-              <ul className="space-y-2">
-                {[...rows].reverse().map((r) => (
-                  <ReportCard
-                    key={r.position}
-                    report={r}
-                    isReference={isClosed && r.position === lastPosition}
-                  />
-                ))}
-              </ul>
+              <Settlement data={settlement.data} />
             )}
-          </Panel>
+          </div>
         </div>
 
         <aside className="space-y-6">

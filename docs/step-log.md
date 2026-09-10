@@ -2290,3 +2290,101 @@ Bundle 650 kB (gzip 196 kB) — recharts'ın payı büyük. Demo için kabul
 edilebilir; sıkıntı olursa grafik dinamik import'a alınabilir.
 
 ADIM 4 (ENS spike) hâlâ açık.
+
+---
+
+## ADIM 30 — Settlement Görünümü
+
+- **Tarih:** 2026-09-10
+- **Durum:** KISMEN GEÇTİ — uç, tablolar ve bütçe göstergesi bitti; **görsel
+  doğrulama yapılamadı** (Chrome eklentisi bağlı değil).
+- **Test:** 14 yazıldı, 14 geçti
+- **Tam suite:** 638/638 yeşil (4.38 sn), `pnpm -r build` temiz
+
+### Settlement verisi hiçbir uçtan çıkmıyordu
+
+`publicMarketView` durumu ve referansı veriyordu ama ödemeleri vermiyordu.
+`GET /market/:id/settlement` eklendi: ödeme tablosu, muhasebe, transferler,
+parça durumu ve bütçe sınırı.
+
+**Market yoksa 404, varsa her zaman 200.** Henüz settle olmamış bir market
+`status: 'not-settled'` dönüyor. Sayfa polling yaparken 404 toplamamalı — o,
+gerçek bir hatayla karışır.
+
+### Bütçe sınırı göstergesi
+
+ROADMAP bunu "jüriye mekanizmanın matematiğini anladığını gösteren detay" diye
+işaretlemiş ve haklı. Her prediction market ödeme tablosu gösterebilir; market
+açılmadan **önce** operatörün toplam maliyetinin — birinin yazdığı bir limitle
+değil, bir argümanla — sınırlandığını gösterebilen neredeyse yok.
+
+Paper §6.2: CE-MSR ödemeleri teleskopluyor, ara fiyatlar sadeleşiyor, geriye
+açılış ve kapanış kalıyor. `H(r, q_son) ≥ 0` olduğu için toplam `b·H(r, q⁰)`
+ile sınırlı — market ne kadar uzarsa uzasın, fiyat ne kadar savrulursa savrulsun.
+
+Ekran iki sayıyı yan yana koyuyor: tavan ve harcanan. Test de bunu, fiyatı her
+turda 0.82 ile 0.19 arasında savuran bir transport'la zorluyor.
+
+### Demo koşusunda öğretici bir sonuç
+
+Gerçek veri:
+
+```
+harcanan         -0.031791
+teorik tavan      0.693147
+sinir icinde      True
+```
+
+Harcanan **negatif**. Market, fiyatı yanlış yöne taşıyan agent'lardan aldığını
+doğru yöne taşıyanlara ödediğinden fazla toplamış; asker deposit'in skorlama
+kısmını fazlasıyla geri almış. Yuvarlama artığı değil, gerçek bir sonuç. Sınır
+maliyeti bağlıyor, işareti değil.
+
+Arayüz bunu hem doğru kırpıyor (çubuk geriye gitmiyor) hem de bir cümleyle
+açıklıyor — açıklamasa "%0 of the cap" tuhaf görünürdü.
+
+### Muhasebe ekranda kapanıyor
+
+```
+giris      2099314719 tinybar
+cikis      2099314719 tinybar
+kapaniyor  True
+```
+
+Tam sayı olarak, kayan noktada değil. `core` agent'ları aşağı yuvarlayıp artığı
+tam olarak askere veriyor, tam da bu yüzden kimlik yaklaşık değil kesin
+sağlanıyor. Uç aritmetiği yayınlıyor ki okuyan yeşil bir tike güvenmek yerine
+kendisi toplayabilsin.
+
+19 ödeme satırı, 3'ü flat-fee, 7'si negatif skor. 21 transfer, 3 parça.
+
+### Renk sadece paranın yönünü anlatıyor
+
+Yeşil ödendi, kırmızı teminattan kesildi, gri hiç skorlanmadı. Bu ekranda
+hiçbir yerde dekoratif renk yok — projeksiyondan okuyanın kimin kaybettiğini
+anlamak için tek bakışı var.
+
+### Kısmi settlement de gösteriliyor
+
+ADIM 16 sertleştirmesinden gelen `blocked` durumu ekranda: kaç parça onaylı,
+kaçının sonucu bilinmiyor, ve neden otomatik tekrar denenmediği. Plan zaten
+kayıtta olduğu için ne olması gerektiği para yarım hareket etmişken de
+gösterilebiliyor — testi de bunu doğruluyor.
+
+### Kabul kriterleri
+
+| Kriter | Durum |
+|---|---|
+| Muhasebe ekranda kapanıyor | EVET, tam sayı olarak, test ediliyor |
+| Bütçe sınırı gösteriliyor, gerçekleşen altında | EVET, test ediliyor |
+| Transfer linkleri çalışıyor | EVET (HashScan, tx id parça başına) |
+| **Ekranın gerçekten doğru göründüğü** | **DOĞRULANMADI** |
+
+### Kalan iş
+
+Görsel doğrulama. `pnpm demo` ayakta, settled market sayfasında "Settlement"
+sekmesi altında.
+
+ADIM 29 (agent dizini) ENS'e bağlı olduğu için atlandı — ENS beklemede.
+
+ADIM 4 (ENS spike) hâlâ açık.
