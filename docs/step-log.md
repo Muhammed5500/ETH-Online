@@ -878,6 +878,138 @@ bu anahtarlarla imza atacak, dosya yedeklenmeli.
 
 ADIM 4 (ENS spike) hâlâ açık, kullanıcı kararıyla ertelendi.
 
+---
+
+## ADIM 13 — HCS Rapor Defteri
+
+- **Tarih:** 2026-09-10
+- **Durum:** GEÇTİ
+- **Test:** 27 yazıldı, 27 geçti (17 mesaj şeması + 10 mirror okuma)
+- **Tam suite:** 265/265 yeşil, build temiz
+- **Kanıt:** `pnpm check:hcs` — testnet'te 13 kontrol, hepsi PASS
+
+### Zincir üstü sonuç
+
+Topic `0.0.10455618`, https://hashscan.io/testnet/topic/0.0.10455618
+
+```
+#1  market-open    210 bytes  hash be17be6a36213cb8...
+#2  report         152 bytes  hash 22d2e293793bef94...
+#3  report         154 bytes  hash 98ef2a435a79cda3...
+#4  market-close   146 bytes  hash 86b957c6091310e5...
+```
+
+**En kritik sonuç: receipt'ten gelen running hash'ler mirror node'dan okunanla
+birebir aynı.** ADIM 14 durma zarını bu değerden türetecek. Eşleşmeseydi
+"rastgelelik doğrulanabilir" iddiası çökerdi; artık bizim beyanımız değil,
+üçüncü tarafın okuyabildiği bir veri.
+
+Dört hash de birbirinden farklı, yani her rapor taze entropi üretiyor.
+
+### Topic anahtar politikası — preflight'ta ertelenen karar
+
+ADIM 2 öncesi kontrolde topic silinememişti ve karar ADIM 13'e bırakılmıştı.
+Karar:
+
+**Admin key YOK.** Admin key verilmeden oluşturulan topic hiçbir zaman
+güncellenemiyor ve silinemiyor — bizim tarafımızdan da. Denetim izi iddiasının
+tamamı bu: rapor defteri "sözleşmeyle" değil, **yapı gereği** kalıcı. Bedeli
+test topic'lerinin testnet'te sonsuza kadar birikmesi, ödemeye değer.
+
+**Submit key VAR**, operatöre ayarlı. Olmasaydı isteyen herkes deftere sahte
+bir `report` mesajı ekleyebilirdi ve kayıt hiçbir şey ifade etmezdi. Submit
+key sadece **kimin yazacağını** kontrol ediyor; yazılmış olanı değiştirme veya
+silme yetkisi vermiyor ve okuma herkese açık kalıyor. Yani: append-only, yazarı
+belli, herkesçe doğrulanabilir.
+
+Admin key olmadığı için submit key topic'in ömrü boyunca sabit, döndürülemez.
+Marketler kısa ömürlü ve her biri kendi topic'ini alıyor, kabul edilebilir.
+
+### BİR MESAJ = BİR SEQUENCE = BİR RUNNING HASH
+
+Bu adımın en önemli tasarım kısıtı ve ADIM 14 buna dayanıyor.
+
+SDK, chunk boyutunu aşan bir mesajı **sessizce** birden fazla işleme bölüyor
+ve her parça kendi sequence number'ını ve running hash'ini alıyor. Sessizce
+ikiye bölünmüş bir rapor iki hash üretirdi ve "marketi hangi hash kapattı"
+sorusunun tek bir cevabı olmazdı.
+
+İki savunma:
+- `assertFitsSingleMessage` gönderimden önce 1024 byte sınırını kontrol ediyor
+- `setMaxChunks(1)` ile SDK bölmek yerine hata veriyor
+
+Aşan mesaj sessizce bölünmüyor, **gürültülü şekilde başarısız oluyor.**
+
+Testte en kötü gerçekçi durum ölçüldü: 20 raporluk bir marketin settlement
+mesajı, 20 ödeme satırıyla, tek mesaja sığıyor. Sığması için payout'lar tuple
+olarak kodlanıyor: `[agentId, position, "s"|"f", amount]`.
+
+### Kanonik kodlama
+
+Alanlar mesaj tipine göre sabit sırada yazılıyor, nesne anahtar sırası ne
+olursa olsun aynı byte'lar çıkıyor. Gerekçe: mesaj üzerinden alınan bir
+digest'in anlamlı olması için kodlamanın tekrarlanabilir olması şart
+(`evidenceDigest`, ADIM 20).
+
+Tanımsız opsiyonel alanlar `null` yazılmıyor, düşürülüyor — "yok" ile
+"boş" aynı byte'ları üretiyor.
+
+### ROADMAP'ten sapmalar
+
+**1. Okuma tarafı `hcs-read.ts` olarak ayrıldı ve `@hashgraph/sdk` import
+etmiyor.**
+
+Bu bir optimizasyon değil, iddianın kendisi: "herkes marketi kendi kontrol
+edebilir" demek, doğrulamanın **yazarın araç zincirini gerektirmemesi**
+demek. Tarayıcı ve `fetch` yeterli. Doğrulama SDK isteseydi iddia çok daha
+zayıf olurdu.
+
+Yan faydası testleri hızlı tutması: barrel üzerinden import edilince suite
+2.26 → 3.11 sn'ye çıkmıştı, ayrıldıktan sonra 2.5 sn.
+
+**2. Okuma mirror node REST üzerinden, `TopicMessageQuery` ile değil.**
+ROADMAP `readTopicMessages(topicId)` diyordu, imza `(network, topicId, opts)`
+oldu. `TopicMessageQuery` uzun ömürlü bir gRPC aboneliği; "hepsini oku ve
+döndür" için REST hem daha uygun hem de yukarıdaki SDK'sız doğrulanabilirlik
+argümanını mümkün kılan şey.
+
+**3. `submitMessage` receipt yerine record çekiyor.** Consensus timestamp
+sadece record'da var, receipt'te yok. Mesaj başına bir ekstra ücretli sorgu
+maliyeti var; değer, çünkü sıralama iddiasını bize güvenmeyen birinin
+kontrol edebilmesini sağlayan alan tam olarak o.
+
+**4. `scripts/check-hcs.ts` eklendi** (ROADMAP'te yok), ADIM 12'deki
+`check-accounts.ts` ile aynı gerekçe: kabul kriteri "HashScan'de görünüyor"
+idi, tekrarlanabilir bir kapı daha iyi kanıt.
+
+**5. Parse edilemeyen mesaj atılmıyor, hatasıyla birlikte döndürülüyor.**
+Topic herkese açık veri. Submit key bir gün olmasa içinde her şey olabilir;
+okuyucunun işi orada ne varsa aynen bildirmek, sessizce filtrelemek değil.
+
+### Tuzaklar
+
+**Build kapısı yine testlerin görmediğini yakaladı.** `vi.fn(async () => ...)`
+parametresiz yazılınca mock'un `mock.calls` tipi boş tuple oluyor ve
+`calls[0][0]` derlenmiyor; ayrıca imza `fetch`'in `(input: string | URL |
+Request)` tipiyle uyuşmuyordu. vitest tipleri esbuild ile soyduğu için testler
+yeşildi. ADIM 8'in dersi üçüncü kez doğrulandı: `pnpm test` tek başına
+yeterli değil.
+
+**Mirror node gecikmesi.** Mesajlar consensus'tan birkaç saniye sonra
+görünüyor. Kontrol script'i 2.5 sn aralıklarla 12 deneme yapıyor; pratikte
+ilk denemede geldi. ADIM 16'da orchestrator bunu hesaba katmalı — settlement
+mirror'dan okumaya bağlıysa bekleme gerekir. Running hash receipt'ten
+geldiği için durma zarı bu gecikmeden etkilenmiyor.
+
+### Kalan risk
+
+Mesaj boyutu şu an rahat (146-210 byte, sınır 1024). ADIM 20'de raporlara
+`evidenceDigest` eklenecek (~75 byte), yine sorun yok. Ama ADIM 19'da veri
+dilimi özetleri mesaja girerse sınır zorlanır — özetler HCS'e değil, digest'i
+HCS'e yazılacak şekilde tasarlanmalı.
+
+ADIM 4 (ENS spike) hâlâ açık.
+
 ### ROADMAP'ten sapmalar
 
 **1. `poolExhaustionProbability` ve `flatFeeProbability` kopyalanmadı.**

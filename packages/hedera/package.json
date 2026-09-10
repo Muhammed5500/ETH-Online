@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Hedera SDK sarmalayici: HCS defteri, rastgelelik, treasury, x402",
+  "description": "Hedera SDK wrapper: accounts, HCS ledger, randomness, x402",
   "main": "./src/index.ts",
   "types": "./src/index.ts",
   "exports": {

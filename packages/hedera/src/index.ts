@@ -46,3 +46,36 @@ export {
   type AccountsFile,
   type AgentAccount,
 } from './accounts-file.js';
+
+export {
+  assertFitsSingleMessage,
+  decodeHcsMessage,
+  encodeHcsMessage,
+  HCS_MAX_SINGLE_MESSAGE_BYTES,
+  HCS_MESSAGE_VERSION,
+  messageBytes,
+  type CompactPayout,
+  type HcsMessage,
+  type HcsMessageType,
+  type MarketCloseMessage,
+  type MarketOpenMessage,
+  type ReportMessage,
+  type SettlementMessage,
+  type TimeoutMessage,
+} from './hcs-message.js';
+
+export {
+  createMarketTopic,
+  submitMessage,
+  type CreateTopicOptions,
+  type SubmitOptions,
+  type SubmitResult,
+} from './hcs.js';
+
+export {
+  mirrorNodeUrl,
+  parseMirrorMessages,
+  readTopicMessages,
+  type ReadTopicOptions,
+  type TopicEntry,
+} from './hcs-read.js';
