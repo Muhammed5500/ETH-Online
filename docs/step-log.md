@@ -593,6 +593,156 @@ verilmeli: Teorem 1 için 6, Teorem 4 için 9. Saklanacak bir şey değil, aksin
 "iki farklı dürüstlük tanımının iki farklı fiyatı var" ayrımı anlatımı
 güçlendiriyor.
 
+---
+
+## ADIM 11 — Simülasyon Harness'ı ve Üç Senaryo
+
+- **Tarih:** 2026-09-10
+- **Durum:** GEÇTİ
+- **Test:** 28 yazıldı, 28 geçti (3'ü kırmızı başladı, ikisi gerçek hataydı)
+- **Tam suite:** 191/191 yeşil, build temiz
+
+### Yazılanlar
+
+`packages/core/src/simulate.ts` — `simulateMarket`, `SimAgent`, üç senaryo
+agent'ı (`makeHonestAgent`, `makeLiarAgent`, `makeLazyAgent`), `honestPool`,
+`closingPrice`.
+
+`packages/core/src/random.ts` — `SeededRandom` buraya taşındı.
+
+### GERÇEK TASARIM HATASI BULUNDU: hareketsiz honest agent
+
+Bu adımın en önemli çıktısı yine bir test kırmızısının arkasındaki hata.
+
+İlk yazdığım honest agent kendi sinyalini `w = 1/(t+1)` ağırlığıyla piyasa
+fiyatına karıştırıyordu. Naif Bayesçi hamle: geçmiş uzadıkça geçmişe daha
+çok güven. Mantıklı görünüyor ve **her önceki raporun dürüst olduğunu
+varsayıyor.**
+
+Sonuç: geç turlarda `w` neredeyse sıfıra iniyor ve honest agent'lar fiyatı
+oynatamaz hale geliyor. Tek bir yalancı fiyatı aşağı itiyor, arkasından gelen
+kimse geri toplayamıyor, market yalanın yakınında kapanıyor.
+
+**Ve yalancı bunun için ödül alıyor** — çünkü CE-MSR fiyatı referansa doğru
+oynatana ödeme yapar, niyete bakmaz. Referans da yalanın yanına düşmüştür.
+
+Ölçüm (60 seed, 19 dürüst + 1 yalancı):
+
+| | `w = 1/(t+1)` | sabit `w = 0.4` |
+|---|---|---|
+| Yalancının pozitif ödeme aldığı koşu | **9 / 17** | **0 / 17** |
+| Ortalama kapanış fiyatı (gerçek 0.75) | ~0.45 | ~0.75 |
+| Market uzunluğu | 12-20 rapor | normal |
+
+Karma senaryoda (10 dürüst + 5 yalancı + 5 tembel) hata daha da net:
+
+| | `w = 1/(t+1)` | sabit `w = 0.4` |
+|---|---|---|
+| Dürüst ortalama | **-0.0051** | **+0.0119** |
+| Yalancı ortalama | -0.0109 | -0.0423 |
+| Tembel ortalama | 0.0000 | 0.0000 |
+
+Yani eski agent modelinde **hiçbir şey yapmamak (tembel, tam 0) dürüst
+davranmaktan daha kârlıydı.** ROADMAP'in ADIM 11 için istediği "dürüstlerin
+ortalama ödemesi en yüksek" kriteri sağlanmıyordu.
+
+**Çözüm:** sabit `selfWeight` (varsayılan 0.4). Her agent, kaçıncı sırada
+çekilirse çekilsin fiyatı kendi inancına doğru sabit bir oranda çekebiliyor.
+Market kendini düzeltebiliyor, yalan birkaç rapor içinde eriyor.
+
+Bu karar `selfWeight` parametresi olarak açıkta duruyor ve **bir regresyon
+testiyle korunuyor**: `selfWeight=0.05` ile yalancı hâlâ kâr edebiliyor,
+`0.4` ile hiç edemiyor. Biri gelip agent'ı "iyileştirip" eski haline
+döndürürse test kırmızı yanacak.
+
+### İkinci bulgu: yalancı referans olursa yalan kazanıyor
+
+Aynı koşuları kapanış fiyatını kimin belirlediğine göre ayırdım. Bu ROADMAP'te
+istenmiyordu, veriye bakarken çıktı:
+
+| Referansı belirleyen | Koşu | Dürüst ort. | Yalancı ort. |
+|---|---|---|---|
+| dürüst agent | 34 | +0.0381 | -0.0904 |
+| **yalancı agent** | **18** | **-0.0478** | **+0.0549** |
+| tembel agent | 8 | +0.0307 | -0.0592 |
+
+Mekanizma herkesi terminal agent'ın raporuna göre skorluyor. Terminal agent
+yalancıysa market yalana çözülüyor ve yalanla savaşan dürüstler ödüyor.
+
+Bu bir hata değil, **k=3'ün ampirik yüzü.** Teorem 1'in sınırladığı şey tam
+olarak bu ve k=3'te sınır 0.278, yani teorik değil gözle görülür seviyede.
+Genel sonucu bozmuyor (dürüst ortalamada hâlâ kazanıyor) ama ADIM 32'de
+README'ye k sayısının yanına konmalı: boşluğun somut karşılığı bu tablo.
+
+Test olarak sabitlendi.
+
+### Senaryo 3 — tam sıfır (paper Teorem 7)
+
+Videodaki en güçlü an, matematiksel karşılığıyla yeşil.
+
+Herkes bir öncekini kopyalarsa `scoreCEM(r, q, q) = Σ r_i log(1) = 0`.
+`Math.log(1)` IEEE754'te **birebir 0**, dolayısıyla bu 1e-10 toleransı
+değil, tam eşitlik. 60 seed × onlarca skorlanan agent, hepsi tam sıfır.
+
+İlk agent `KL(r || prior)` alıyor, o da tam. İki varyant da test edildi:
+- `whenFirst` verilirse (0.7): ilk agent `KL` alıyor, geri kalan herkes 0
+- `whenFirst` verilmezse ilk agent prior'ı raporluyor: `KL(prior||prior)=0`,
+  **bütün market tam sıfır ödüyor**
+
+ROADMAP ikincisini tarif ediyordu ("ilk agent prior'ı raporlar") ama o
+dejenere durum; paper'ın Teorem 7'si asıl birincisi. İkisi de duruyor.
+
+### Testler neden tek seed'e değil seed taramasına dayanıyor
+
+Çekiliş sırası ve durma turu rastgele. "Yalancı para kaybetti" tek seed'de
+doğrulanamaz: bazı seed'lerde yalancı sabit ücret kuyruğuna düşüyor ve hiç
+skorlanmıyor — doğru sonuç ama test edilen şey o değil.
+
+Bu yüzden senaryo testleri 60 seed tarıyor ve iddianın gerçekten sınandığı
+koşular üzerinden özellik doğruluyor. Ayrıca her testte "kaç koşuda sınandı"
+sayacı var (`expect(scoredRuns).toBeGreaterThan(10)`) — iddia hiç
+sınanmadan yeşil yanamıyor. ADIM 7 ve 9'daki 100 rastgele market disiplininin
+aynısı.
+
+### Benim test hatam (kod değil test yanlıştı)
+
+Scenario 2'nin "slash edilen para askere döner" testinde pozitif ödemeleri
+bir tarafta sadece skorlu agent'lar üzerinden, diğer tarafta sabit ücretler
+dahil toplamışım. Kıyas baştan tutarsızdı ve testin talep ettiği şey aslında
+`scoreSlash > k·R` idi — kastedilen bu değildi.
+
+Kod doğruydu. Testi doğru kurala göre yeniden yazdım: askerin iadesi slash
+edilen parayı **tam olarak** taşımalı ve agent'lara giden toplam sadece
+`bondsReturned + scoreTotal` olmalı. Böylece ileride biri slash'i agent'lara
+dağıtmaya kalkarsa test kırılıyor.
+
+### ROADMAP'ten sapmalar
+
+**1. `SeededRandom` `test/helpers.ts`'ten `src/random.ts`'e taşındı.**
+`simulateMarket` seed alan üretim kodu ve aynı PRNG'ye ihtiyaç duyuyor.
+mulberry32'yi iki yerde tutmak, testin test ettiği şeyle ayrışması demekti.
+`test/helpers.ts` yeniden dışa aktarıyor, mevcut import'lar ve ADIM 1
+testleri değişmedi. `ScriptedRandom` ve `LabelledRandom` test tarafında kaldı.
+
+**2. `simulateMarket` beşinci bir `opts` parametresi aldı** (`id`, `question`,
+`deposit`). ROADMAP imzası dört parametre; hepsinin varsayılanı var, imza
+geriye uyumlu. Gerekçe: ADIM 31 demo senaryolarını isimlendirecek, ayrıca
+settlement'ın `deposit` seçeneği test edilebilir olmalı.
+
+**3. `makeHonestAgent` `selfWeight` parametresi aldı.** ROADMAP "basit
+ağırlıklı ortalama yeterli" diyordu; hangi ağırlık olduğu ölçülerek seçildi
+ve yukarıdaki hatanın sebebi tam olarak bu parametreydi. Açıkta duruyor ki
+karar görünür olsun.
+
+### Kalan risk
+
+Mekanizma tarafında yok. Dört senaryo da `DEFAULT_PARAMS` üzerinde koşuyor —
+daha kolay bir ayarla değil, gönderdiğimiz konfigürasyonla.
+
+Proje tarafında **ADIM 4 (SPIKE C, ENSv2 Sepolia) hâlâ açık, ADIM 5 spike
+kapısı hiç çalıştırılmadı.** FAZ 1 bitti, sıradaki adım ADIM 12 ile FAZ 2
+(Hedera). ENS spike'ı artık gerçekten gecikti.
+
 ### ROADMAP'ten sapmalar
 
 **1. `poolExhaustionProbability` ve `flatFeeProbability` kopyalanmadı.**

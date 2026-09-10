@@ -8,36 +8,14 @@
  *   interface RandomSource { next(label: string): number }
  */
 
-/** mulberry32 — küçük, hızlı, tekrarlanabilir PRNG. */
-function mulberry32(seed: number): () => number {
-  let a = seed >>> 0;
-  return () => {
-    a = (a + 0x6d2b79f5) >>> 0;
-    let t = a;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
 /**
- * Seed'li ardışık kaynak. Aynı seed -> aynı dizi.
- * `label` sadece hata ayıklama için kaydedilir, akışı değiştirmez.
+ * `SeededRandom` artık `src/random.ts` içinde (ADIM 11).
+ *
+ * `simulate.ts` seed alan üretim kodu ve aynı PRNG'ye ihtiyaç duyuyor. İki
+ * kopya tutmak, testin test ettiği şeyle ayrışması demekti. Buradan yeniden
+ * dışa aktarılıyor ki mevcut testler ve import'lar değişmesin.
  */
-export class SeededRandom {
-  private readonly rng: () => number;
-  readonly log: Array<{ label: string; value: number }> = [];
-
-  constructor(seed: number) {
-    this.rng = mulberry32(seed);
-  }
-
-  next(label: string): number {
-    const value = this.rng();
-    this.log.push({ label, value });
-    return value;
-  }
-}
+export { SeededRandom } from '../src/random.js';
 
 /**
  * Önceden yazılmış değerleri sırayla döndürür.

@@ -56,3 +56,19 @@ export {
 } from './settlement.js';
 
 export { createMarketState, Market, type CreateMarketOptions } from './market.js';
+
+export { SeededRandom } from './random.js';
+
+export {
+  closingPrice,
+  honestPool,
+  makeHonestAgent,
+  makeLazyAgent,
+  makeLiarAgent,
+  simulateMarket,
+  type HonestAgentOptions,
+  type LazyAgentOptions,
+  type SimAgent,
+  type SimulateOptions,
+  type SimulationResult,
+} from './simulate.js';
