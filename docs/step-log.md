@@ -593,6 +593,54 @@ verilmeli: Teorem 1 için 6, Teorem 4 için 9. Saklanacak bir şey değil, aksin
 "iki farklı dürüstlük tanımının iki farklı fiyatı var" ayrımı anlatımı
 güçlendiriyor.
 
+### ROADMAP'ten sapmalar
+
+**1. `poolExhaustionProbability` ve `flatFeeProbability` kopyalanmadı.**
+ROADMAP ikisini de `kcalc.ts` imzasında listeliyor, ama ADIM 6'da zaten
+`config.ts`'e yazılmışlardı ve parametre doğrulaması onları kullanıyor.
+Yeniden yazmak iki gerçek kaynak üretirdi. `kcalc.ts` bunları `config.ts`'ten
+yeniden dışa aktarıyor: ROADMAP'in istediği yüzey duruyor, tek kaynak korunuyor.
+
+**2. Kök `build` scripti artık `scripts/` klasörünü de tip kontrolünden
+geçiriyor.** `tsconfig.scripts.json` eklendi, kök `build` = `pnpm -r build &&
+tsc -p tsconfig.scripts.json`.
+
+Gerekçe: `scripts/kcalc.ts` README'ye girecek submission kodu ama hiçbir
+workspace paketinin tsconfig'inde değildi, yani hiç tip kontrolü görmüyordu.
+`scripts/check-hedera.ts` de aynı durumdaydı. ADIM 8'in dersi tam buydu:
+testler yeşilken build kırmızıydı ve gerçek bir imza hatası yakalanmıştı.
+`pnpm -r build` tek başına yeterli değil çünkü `-r` kök paketi kapsamıyor.
+
+`pnpm -r build` hâlâ çalışıyor ve değişmedi; kapı komutu `pnpm build` olarak
+kullanılmalı. İkisi de şu an yeşil, mevcut `check-hedera.ts`'te tip hatası
+çıkmadı.
+
+**3. `@ethonline/core` kök `package.json`'a bağımlılık olarak eklendi**
+(`workspace:*`). Böylece `scripts/*` paketi ismiyle import edebiliyor, göreli
+yola gerek kalmıyor. ADIM 12 (`setup-hedera-accounts.ts`) ve ADIM 21
+(`register-agents.ts`) aynı ihtiyacı duyacak.
+
+### Tuzaklar
+
+Bu adımda kırmızı test çıkmadı, düzeltilecek bir şey de olmadı. Formüller
+PLAN Bölüm 2.3'te zaten elle hesaplanmış ve tablolanmıştı; kod onları
+üretti, tersini değil.
+
+Tek küçük engel araç tarafında: büyük dosyayı bash heredoc ile yazmak
+başarısız oldu (`unexpected EOF`), dosya hiç oluşmadı. Doğrudan dosya yazma
+aracına geçildi. Kaydediliyor çünkü sonraki adımlarda daha büyük dosyalar var.
+
+### Kalan risk
+
+Mekanizma tarafında yok — bu adım saf hesap, mekanizmaya dokunmuyor.
+
+Proje tarafında **ADIM 4 (SPIKE C, ENSv2 Sepolia) hâlâ açık** ve ADIM 5
+(spike kapısı) hiç çalıştırılmadı. ADIM 3'ün kaydındaki uyarı geçerliliğini
+koruyor: ENS'te Sepolia adresleri dokümanda yok ve "admin rolleri sadece
+registration anında" kısıtı deneyerek doğrulanmalı. FAZ 2'ye (Hedera)
+girmeden önce bir oturum ayrılmalı; kesme kararı 12. güne bırakılmamalı.
+
+
 ---
 
 ## ADIM 11 — Simülasyon Harness'ı ve Üç Senaryo
@@ -1154,49 +1202,175 @@ orchestrator'a örnek teşkil ediyor.
 
 ADIM 4 (ENS spike) hâlâ açık.
 
-### ROADMAP'ten sapmalar
+---
 
-**1. `poolExhaustionProbability` ve `flatFeeProbability` kopyalanmadı.**
-ROADMAP ikisini de `kcalc.ts` imzasında listeliyor, ama ADIM 6'da zaten
-`config.ts`'e yazılmışlardı ve parametre doğrulaması onları kullanıyor.
-Yeniden yazmak iki gerçek kaynak üretirdi. `kcalc.ts` bunları `config.ts`'ten
-yeniden dışa aktarıyor: ROADMAP'in istediği yüzey duruyor, tek kaynak korunuyor.
+## ADIM 15 — x402 ile Korunan API Endpointleri
 
-**2. Kök `build` scripti artık `scripts/` klasörünü de tip kontrolünden
-geçiriyor.** `tsconfig.scripts.json` eklendi, kök `build` = `pnpm -r build &&
-tsc -p tsconfig.scripts.json`.
+- **Tarih:** 2026-09-10
+- **Durum:** GEÇTİ
+- **Test:** 55 yazıldı, 55 geçti (11 pricing + 14 signature + 30 route)
+- **Tam suite:** 344/344 yeşil, build temiz, 2.2 sn
+- **Kanıt:** `pnpm check:api` — testnet'te gerçek ödeme, 14 kontrol PASS
 
-Gerekçe: `scripts/kcalc.ts` README'ye girecek submission kodu ama hiçbir
-workspace paketinin tsconfig'inde değildi, yani hiç tip kontrolü görmüyordu.
-`scripts/check-hedera.ts` de aynı durumdaydı. ADIM 8'in dersi tam buydu:
-testler yeşilken build kırmızıydı ve gerçek bir imza hatası yakalanmıştı.
-`pnpm -r build` tek başına yeterli değil çünkü `-r` kök paketi kapsamıyor.
+### Zincir üstü sonuç
 
-`pnpm -r build` hâlâ çalışıyor ve değişmedi; kapı komutu `pnpm build` olarak
-kullanılmalı. İkisi de şu an yeşil, mevcut `check-hedera.ts`'te tip hatası
-çıkmadı.
+```
+Market:   mkt-2026-09-10-001  (topic 0.0.10457425)
+Deposit:  0.99314719 HBAR  = b·log2 + k·R, tam olarak
+Bond:     1.00000000 HBAR  (agent-01 kendi hesabından ödedi)
+Hazine:   +1.99314719 HBAR — beklenenle birebir
+```
 
-**3. `@ethonline/core` kök `package.json`'a bağımlılık olarak eklendi**
-(`workspace:*`). Böylece `scripts/*` paketi ismiyle import edebiliyor, göreli
-yola gerek kalmıyor. ADIM 12 (`setup-hedera-accounts.ts`) ve ADIM 21
-(`register-agents.ts`) aynı ihtiyacı duyacak.
+Ödemesiz istek 402, ödemeli istek 201, para gerçekten taşındı ve tutar
+mekanizmanın hesapladığı sınırla birebir eşleşti.
 
-### Tuzaklar
+### DÖRDÜNCÜ TUZAK — 402 challenge gövdede değil
 
-Bu adımda kırmızı test çıkmadı, düzeltilecek bir şey de olmadı. Formüller
-PLAN Bölüm 2.3'te zaten elle hesaplanmış ve tablolanmıştı; kod onları
-üretti, tersini değil.
+SPIKE A üç tuzak kaydetmişti. Dördüncüsü burada çıktı:
 
-Tek küçük engel araç tarafında: büyük dosyayı bash heredoc ile yazmak
-başarısız oldu (`unexpected EOF`), dosya hiç oluşmadı. Doğrudan dosya yazma
-aracına geçildi. Kaydediliyor çünkü sonraki adımlarda daha büyük dosyalar var.
+**402 yanıtının gövdesi boş `{}`. Ödeme gereksinimleri `payment-required`
+header'ında, base64 kodlanmış JSON olarak geliyor.**
+
+Gövdeyi okuyunca doğru fiyatlandırılmış bir 402 boş görünüyor. Önce buna
+takıldım: fiyat doğruydu, ödeme çalışıyordu, sadece kontrolüm yanlış yere
+bakıyordu.
+
+`@x402/core` bunun için decode helper'ı **vermiyor** (sadece
+`decodePaymentResponseHeader` var, o da yanıt tarafı için). Elle çözülüyor:
+
+```ts
+JSON.parse(Buffer.from(res.headers.get('payment-required')!, 'base64').toString('utf-8'))
+```
+
+ADIM 20'de agent'lar Graph'a ödeme yaparken ve ADIM 22'de servis tüketicisi
+yazılırken tekrar lazım olacak.
+
+### GERÇEK KOD ZAYIFLIĞI: sessiz hex kesme
+
+İmza doğrulamada `Buffer.from(str, 'hex')` kullanıyordum. Node bu fonksiyonda
+**geçersiz karakterde hata vermiyor, ilk geçersiz karakterde durup okuduğu
+kadarını döndürüyor:**
+
+```
+Buffer.from('abZZ','hex')   ->  1 byte
+Buffer.from('nothex','hex') ->  0 byte
+```
+
+Bozuk bir imza "kısa ama düzgün" bir imza gibi doğrulamaya giriyor ve hata
+mesajı "imza raporla eşleşmiyor" oluyor. Aynı görünen sonuç, tamamen farklı
+sebep — agent yazan biri için yanlış teşhis.
+
+Hex karakterleri artık elle doğrulanıyor. Regresyon testi
+`Buffer.from('abZZ','hex').length === 1` olduğunu da kayda geçiriyor ki neden
+elle kontrol ettiğimiz belgeli kalsın.
+
+### İmza neyi bağlıyor
+
+Rapor gönderimi **ücretsiz** olan tek yazma işlemi, dolayısıyla kimliği ödeme
+kanıtlayamaz. İmza olmasa herkes herhangi bir agent adına rapor gönderebilirdi
+ve herkes terminal rapora göre skorlandığı için bu settlement'ı sahtelemek
+demek.
+
+İmzalanan mesaj: `ethonline-report|v1|<marketId>|<agentId>|<position>|<p1>`
+
+| Alan | Olmasaydı |
+|---|---|
+| marketId | bir marketin imzası başka markete replay edilir |
+| agentId | imza başka agent'a atfedilir |
+| position | rapor başka sırada replay edilir, farklı önceki fiyata karşı skorlanır |
+| p1 | yükün kendisi |
+
+Dördü de ayrı replay testine bağlı.
+
+`p1` `toFixed(12)` ile yazılıyor: JSON anahtar sırası ve sayı biçimlendirmesi
+çalışma zamanları arasında değişiyor, tekrar üretilemeyen byte'lar üzerindeki
+imza hiçbir şey imzalamıyor demek.
+
+**İmza ham olasılık üzerinden**, kırpmadan önce. Agent'ın taahhüt ettiği o ve
+kırpmanın bağımsız denetlenebilir kalması gerekiyor.
+
+### İki enjeksiyon noktası — testlerin var olma sebebi
+
+**`paymentGate` enjekte ediliyor.** `createApp` facilitator'a hiç dokunmuyor.
+Bütün route yüzeyi ağa çıkmadan test edilebiliyor (30 test), gerçek x402 akışı
+ayrı kapıda doğrulanıyor. Gate'i `createApp` içinde kurmak her endpoint'i
+6. güne kadar test edilemez bırakırdı.
+
+**`Ledger` arayüzü enjekte ediliyor.** Her endpoint HCS'e yazıyor; bu dikiş
+olmadan tek bir route bile `pnpm test` kapsamına giremezdi. ADIM 16
+orchestrator'ı aynı dikişe ihtiyaç duyacak: turları sahte ledger'a karşı
+koşturabilmek, mekanizmayı ayıklamakla ağı ayıklamak arasındaki fark.
+
+Üretim implementasyonu bilinçli olarak çok ince, ki sahte ile gerçek
+davranışta ayrışmasın.
+
+### Sızıntı kuralı koda ve teste bağlandı
+
+`POST /market/:id/bond` yanıtı **her zaman `position: null`** döndürüyor,
+testi var. Sıra yayınlansaydı son agent daha rapor vermeden referans olacağını
+bilirdi (PLAN Bölüm 6.4).
+
+`GET /market/:id` `pendingAgentId` ve `drawnAgents` göstermiyor, test bunu
+string araması ile doğruluyor.
+
+### Dinamik fiyatlandırma
+
+x402'nin `DynamicPrice` desteği var ve `context.adapter.getBody?()` ile gövdeye
+erişiliyor.
+
+`POST /market` fiyatı gövdedeki parametrelerden `depositTinybar()` ile
+hesaplanıyor — **handler'ın kullandığı fonksiyonun aynısı.** Ayrı ayrı
+hesaplansalardı ayrışabilirlerdi; ayrışma, ödeyebileceğinden fazlasını
+ödemeye söz vermiş bir market demek.
+
+`POST /market/:id/bond` fiyatı o marketin kendi bond miktarından geliyor.
+`:id` deseni destekleniyor (x402 eşleştiricisi `:param`, `[param]` ve `*`
+çeviriyor).
+
+### Yeni paket: `@ethonline/env`
+
+dotenv çalışma dizini tuzağı üçüncü kez çıktı (SPIKE A, ADIM 12, şimdi
+apps/api). `scripts/load-env.ts` paket kökü dışında kaldığı için apps/api
+import edemedi.
+
+Ayrı pakete taşındı. Kök `pnpm-workspace.yaml` aranarak bulunuyor, sabit
+sayıda `..` ile değil — paket yeri değişirse sessizce bozulmasın.
+
+### Benim test hatam: sahte hash'te float taşması
+
+Sahte ledger'ın running hash üreticisini düz `*` ile yazmışım. `sequence *
+2654435761` ardından tekrarlı çarpmalar 2^53'ü aşıp alt bitleri sıfırlıyor ve
+**bütün sequence'ler aynı hash'e çöküyordu** — sahtenin var olma sebebi olan
+tek özelliği sessizce bozuyordu. `Math.imul` ile 32 bit uzayına alındı.
+
+Kodda değil test double'ında bir hataydı ama gerçek bir hata: ADIM 16 turları
+bu sahte ledger'a karşı koşacak, hash'ler ilerlemezse market hiç ilerlemez.
+
+### Bu dosyada bulduğum bozukluk düzeltildi
+
+ADIM 11 kaydını eklerken ADIM 10 kaydının **ortasındaki** bir cümleye
+tutunmuşum; ADIM 10'un "sapmalar / tuzaklar / kalan risk" bölümleri dosyanın
+en sonuna itilmişti. Yerine taşındı, bölüm sırası doğrulandı.
+
+### Route özeti
+
+| Yol | Erişim |
+|---|---|
+| `POST /market` | ödemeli (deposit) |
+| `POST /market/:id/bond` | ödemeli (bond) |
+| `POST /resolve` | ödemeli — **501, ADIM 22'de doldurulacak** |
+| `POST /market/:id/report` | imzalı, ücretsiz |
+| `POST /agents/register` | **herkese açık**, ödeme yok, allowlist yok |
+| `GET /markets`, `/market/:id`, `/market/:id/reports`, `/agents`, `/health` | açık |
 
 ### Kalan risk
 
-Mekanizma tarafında yok — bu adım saf hesap, mekanizmaya dokunmuyor.
+Market durumu bellekte. HCS kalıcı kayıt olduğu için kayıp, çalışan bir
+marketi kaybetmek demek, geçmişi değil. Mekanizma bitmeden veritabanı eklemek
+yanlış probleme harcanan emek olurdu; ADIM 32'de README'de belirtilecek.
 
-Proje tarafında **ADIM 4 (SPIKE C, ENSv2 Sepolia) hâlâ açık** ve ADIM 5
-(spike kapısı) hiç çalıştırılmadı. ADIM 3'ün kaydındaki uyarı geçerliliğini
-koruyor: ENS'te Sepolia adresleri dokümanda yok ve "admin rolleri sadece
-registration anında" kısıtı deneyerek doğrulanmalı. FAZ 2'ye (Hedera)
-girmeden önce bir oturum ayrılmalı; kesme kararı 12. güne bırakılmamalı.
+`POST /market/:id/report` çalışması için agent'ın önce çekilmiş olması
+gerekiyor (`pendingAgentId`). O sıralama ADIM 16'nın işi; endpoint hazır,
+sürücüsü yok.
+
+ADIM 4 (ENS spike) hâlâ açık.

@@ -3,19 +3,32 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Orchestrator + x402 ile korunan endpointler",
+  "description": "Orchestrator and x402-gated endpoints",
   "main": "./src/index.ts",
   "types": "./src/index.ts",
   "exports": {
     ".": "./src/index.ts"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json"
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx watch src/server.ts",
+    "start": "tsx src/server.ts"
   },
   "dependencies": {
     "@ethonline/core": "workspace:*",
     "@ethonline/hedera": "workspace:*",
     "@ethonline/graph": "workspace:*",
-    "@ethonline/ens": "workspace:*"
+    "@ethonline/ens": "workspace:*",
+    "@hashgraph/sdk": "^2.81.0",
+    "@x402/core": "^2.25.0",
+    "@x402/express": "^2.25.0",
+    "@x402/hedera": "^2.25.0",
+    "express": "^5.2.1",
+    "@ethonline/env": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "supertest": "^7.1.4",
+    "@types/supertest": "^6.0.3"
   }
 }

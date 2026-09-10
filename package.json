@@ -17,7 +17,9 @@
     "setup:hedera": "tsx scripts/setup-hedera-accounts.ts",
     "check:accounts": "tsx scripts/check-accounts.ts",
     "check:hcs": "tsx scripts/check-hcs.ts",
-    "check:randomness": "tsx scripts/check-randomness.ts"
+    "check:randomness": "tsx scripts/check-randomness.ts",
+    "api": "tsx apps/api/src/server.ts",
+    "check:api": "tsx scripts/check-api.ts"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
@@ -29,6 +31,10 @@
   "dependencies": {
     "@ethonline/core": "workspace:*",
     "@hashgraph/sdk": "^2.81.0",
-    "@ethonline/hedera": "workspace:*"
+    "@ethonline/hedera": "workspace:*",
+    "@ethonline/env": "workspace:*",
+    "@ethonline/api": "workspace:*",
+    "@x402/fetch": "^2.25.0",
+    "@x402/hedera": "^2.25.0"
   }
 }

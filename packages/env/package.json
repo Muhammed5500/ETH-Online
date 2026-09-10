@@ -1,0 +1,18 @@
+{
+  "name": "@ethonline/env",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Repo-root .env loader, shared by apps and scripts",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "dotenv": "^17.4.2"
+  }
+}
