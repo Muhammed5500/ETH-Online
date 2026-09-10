@@ -1010,6 +1010,150 @@ HCS'e yazılacak şekilde tasarlanmalı.
 
 ADIM 4 (ENS spike) hâlâ açık.
 
+---
+
+## ADIM 14 — HCS Running Hash'ten Rastgelelik
+
+- **Tarih:** 2026-09-10
+- **Durum:** GEÇTİ
+- **Test:** 24 yazıldı, 24 geçti
+- **Tam suite:** 289/289 yeşil, build temiz
+- **Kanıt:** `pnpm check:randomness` — testnet'te gerçek market, 11 kontrol PASS
+
+### Zincir üstü sonuç
+
+İki koşu yapıldı. İlki ilk turda kapandı (u=0.073 < α=0.125, meşru ama %12.5'lik
+durum ve çok turlu yolu sınamıyor). İkincisi:
+
+```
+Topic 0.0.10455778
+# 1  agent-01  p=0.572  u=0.170055  continue
+# 2  agent-11  p=0.615  u=0.604411  continue
+# 3  agent-02  p=0.669  u=0.953652  continue
+# 4  agent-14  p=0.577  u=0.758507  continue
+# 5  agent-13  p=0.674  u=0.635815  continue
+# 6  agent-20  p=0.649  u=0.325732  continue
+# 7  agent-10  p=0.633  u=0.565451  continue
+# 8  agent-19  p=0.696  u=0.072982  CLOSE
+```
+
+**8 rapor — beklenen market uzunluğunun tam kendisi** (E = 1/α = 8). 8 zar,
+8 çekiliş, aynı agent iki kez çekilmedi, hiçbir durma değeri çekiliş değeri
+olarak tekrar kullanılmadı.
+
+En önemlisi: bütün kararlar **sadece mirror node verisiyle** yeniden türetildi
+ve uydurma bir iddianın yakalandığı gösterildi.
+
+### İKİ GERÇEK HATA ÖNLENDİ
+
+Bu adımın asıl değeri iki incelikte. İkisi de sessiz kalsa çalışıyor görünen
+ama bozuk bir market üretirdi.
+
+**1. `[0,1)` aralığı gerçekten kapalı değildi.**
+
+ROADMAP "ilk 8 byte'ı uint64 alıp 2^64'e böl" diyor. Doğru görünüyor ve değil:
+
+```js
+Number(2n ** 64n - 1n) / 2 ** 64  // === 1  (tam olarak 1.0)
+```
+
+`Number(2^64-1)` çift duyarlıkta **yukarı yuvarlanıp** 2^64 oluyor ve bölme
+tam 1.0 veriyor. Aralık artık yarı açık değil. Bir 1.0, `floor(u * poolSize)`
+ifadesini havuzun bir ötesine taşırdı.
+
+Çözüm: en üstteki 53 biti al (`value >> 11n`), 2^53'e böl. Bu bir double'ın
+tam olarak tutabildiği genişlik; en büyük sonuç `(2^53-1)/2^53`, yuvarlama
+olmadan 1'in altında. Preflight'ın hesabıyla 2^-53 farkla aynı değeri veriyor,
+yani ROADMAP'in niyeti korunuyor.
+
+Test hem `hashToUnitInterval(0xff...)` < 1 olduğunu hem de naif formülün
+tam 1.0 verdiğini kayda geçiriyor.
+
+**2. Durma zarı ile agent çekilişi aynı byte'ları okuyamaz.**
+
+Bir tur rastgeleliği iki kez tüketiyor: rapor N yazıldıktan sonra durma zarı,
+market devam ederse agent N+1'in çekilişi. İkisi de doğal olarak en yeni
+running hash'e uzanır.
+
+**Aynı byte'ları okurlarsa çekiliş zehirlenir.** Çekilişe ulaşmış olmak, durma
+zarının tutmadığı anlamına gelir, yani `u >= alpha`. Aynı `u`'yu
+`floor(u * poolSize)` içine vermek havuzun ilk `alpha` kesirini **sonsuza
+kadar erişilemez** yapar. α=1/8 ile ilk %12.5'lik agent dilimi hiç çekilemez.
+
+Çözüm: her amaç hash'in farklı bir 8 byte'lık penceresini okuyor. `stop`
+byte 0-7 (ROADMAP'in kuralı aynen korunuyor), `draw` byte 8-15. Hash SHA-384
+çıktısı, ayrık pencereler bu amaç için bağımsız.
+
+**Neden ikinci bir hash turu değil de byte penceresi:** doğrulamanın tarayıcıda,
+kripto kütüphanesi olmadan yapılabilmesi için. Aynı gerekçe `hcs-read.ts`'in
+SDK'sız olmasıyla aynı.
+
+Test bu yanlılığı doğrudan ölçüyor: 3000 hash'te, durma zarını atlatan
+koşuların %8-17'sinde çekiliş değeri α'nın altında kalıyor. Byte'lar
+paylaşılsaydı bu oran tam sıfır olurdu.
+
+### Grinding — ROADMAP'in istediğinden daha güçlü bir ifade
+
+ROADMAP "agent teorik olarak mesaj içeriğini değiştirerek hash'i grind
+edebilir, ama consensus timestamp içerdiği için pratikte zor" demeyi
+öneriyordu. Durum bundan daha iyi:
+
+1. Agent HCS'e yazmıyor, orchestrator yazıyor. Agent sadece bir olasılık
+   gönderiyor.
+2. Running hash, **ağın consensus anında atadığı** timestamp'i içeriyor.
+   Gönderen bunu seçemiyor, öngöremiyor.
+
+Yani grinding "zor" değil, mesajı göndermeden önce hash'i hesaplamak mümkün
+değil. README'de bu şekilde yazılmalı. Yine de production için VRF/drand
+önerisi duruyor (PLAN Bölüm 16).
+
+### `HcsRandomSource` hiçbir zaman `Math.random`'a düşmüyor
+
+Hash gelmeden `next()` çağrılırsa hata fırlatıyor. Sessizce yerel bir
+üretece düşmek, doğrulanabilir bir marketle doğrulanamaz bir marketi
+birbirinden ayırt edilemez hale getirirdi. Test bunu kontrol ediyor.
+
+Ayrıca her değer `draws` dizisine (etiket, amaç, hash hex, değer) kaydediliyor;
+tek başına bu kayıttan bütün koşu yeniden hesaplanabiliyor.
+
+### ROADMAP'ten sapmalar
+
+**1. `hashToUnitInterval(hash)` ikinci bir `purpose` parametresi aldı.**
+Varsayılanı `'stop'`, yani ROADMAP'teki çağrı imzası ve davranışı aynen
+çalışıyor. Gerekçe yukarıda (2).
+
+**2. `shouldStop` ayrıca dışa açıldı.** ROADMAP sadece
+`verifyStoppingDecision` istiyordu ama karar kuralının kendisi de tek satır
+ve dışarıdan çağrılabilir olmalı — orchestrator (ADIM 16) ve doğrulayan
+üçüncü taraf aynı fonksiyonu kullanıyor, iki ayrı uygulama olmuyor.
+
+**3. `scripts/check-randomness.ts` eklendi.** Hash aritmetiğini birim testler
+zaten kapsıyordu; bu script `HcsRandomSource`'u `core`'daki gerçek `Market`
+sınıfına takıp marketi consensus'a kapattırıyor. Aynı zamanda ADIM 16
+orchestrator döngüsünün küçük bir provası — arayüzler birbirine oturmuyorsa
+6. günde değil şimdi öğreniyoruz. Oturdu.
+
+### Benim test hatam (kod değil test yanlıştı)
+
+"Preflight'ın 0.689840 değerini yeniden üretiyor" diye bir test yazdım ve
+hex byte'ları **uydurdum**. Uydurduğum `b0a4d1f2c3b4a596` gerçekte 0.690015
+veriyor. Preflight'ın orijinal hash'i elimde olmadığı için o sayı yeniden
+üretilemez; test baştan temelsizdi.
+
+Kendi sabitine karşı kendini doğrulayan bir test zaten değersizdi. Elle
+kontrol edilebilir sabitlerle değiştirdim: `8000...` → tam 0.5, `4000...` →
+0.25, `c000...` → 0.75, ve son byte'taki 1 → 1e-15'ten küçük (big-endian
+olduğunu kanıtlıyor). Bunlar aritmetiği bağımsız olarak sabitliyor.
+
+### Kalan risk
+
+Mekanizma tarafında yok. ADIM 16'da dikkat edilecek tek şey sıra:
+**durma zarı, raporun HCS'e yazılmasından SONRA atılmalı**, çünkü rastgelelik
+o raporun hash'inden geliyor. check-randomness.ts bu sırayı doğru kuruyor ve
+orchestrator'a örnek teşkil ediyor.
+
+ADIM 4 (ENS spike) hâlâ açık.
+
 ### ROADMAP'ten sapmalar
 
 **1. `poolExhaustionProbability` ve `flatFeeProbability` kopyalanmadı.**

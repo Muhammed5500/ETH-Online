@@ -16,7 +16,8 @@
     "check:hedera": "tsx scripts/check-hedera.ts",
     "setup:hedera": "tsx scripts/setup-hedera-accounts.ts",
     "check:accounts": "tsx scripts/check-accounts.ts",
-    "check:hcs": "tsx scripts/check-hcs.ts"
+    "check:hcs": "tsx scripts/check-hcs.ts",
+    "check:randomness": "tsx scripts/check-randomness.ts"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

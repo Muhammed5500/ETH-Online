@@ -79,3 +79,16 @@ export {
   type ReadTopicOptions,
   type TopicEntry,
 } from './hcs-read.js';
+
+export {
+  fromHex,
+  hashToUnitInterval,
+  HCS_RUNNING_HASH_BYTES,
+  HcsRandomSource,
+  purposeFromLabel,
+  shouldStop,
+  toHex,
+  verifyStoppingDecision,
+  type RandomnessDraw,
+  type RandomnessPurpose,
+} from './randomness.js';
