@@ -16,13 +16,17 @@ import {
 } from '@ethonline/hedera';
 import { createApp, DEFAULT_API_CONFIG } from './app.js';
 import { hederaLedger } from './ledger.js';
-import { createPaymentGate } from './payment.js';
+import {
+  createPaymentGate,
+  DEFAULT_FACILITATOR_TIMEOUT_MS,
+  warmUpFacilitator,
+} from './payment.js';
 import { MarketStore } from './store.js';
 import { formatTinybar, depositTinybar, bondTinybar } from './pricing.js';
 
 const PORT = Number(readEnv(process.env, 'API_PORT') ?? 4020);
 
-function main(): void {
+async function main(): Promise<void> {
   const cfg = hederaConfigFromEnv();
   const treasury = treasuryFromEnv();
   if (!treasury) {
@@ -40,9 +44,17 @@ function main(): void {
   const client = createHederaClient(cfg);
   const markets = new MarketStore();
 
+  // Connect to the facilitator before taking traffic. The first outbound
+  // connection of a cold process is the slowest one it will make, and letting
+  // the first paying customer absorb that is the wrong trade.
+  const warm = await warmUpFacilitator(facilitatorUrl);
+
   const paymentGate = createPaymentGate({
     treasuryAccountId: treasury.accountId,
     facilitatorUrl,
+    facilitatorTimeoutMs: Number(
+      readEnv(process.env, 'FACILITATOR_TIMEOUT_MS') ?? DEFAULT_FACILITATOR_TIMEOUT_MS,
+    ),
     markets,
     defaultParams: DEFAULT_API_CONFIG.defaultParams,
     hbarPerUnit,
@@ -64,7 +76,14 @@ function main(): void {
     console.log(`  Port:          ${PORT}`);
     console.log(`  Network:       ${cfg.network}`);
     console.log(`  Treasury:      ${treasury.accountId}`);
-    console.log(`  Facilitator:   ${facilitatorUrl}`);
+    console.log(
+      `  Facilitator:   ${facilitatorUrl}  ` +
+        (warm.ok ? `(reachable, ${warm.ms}ms)` : `(UNREACHABLE: ${warm.error ?? 'unknown'})`),
+    );
+    if (!warm.ok) {
+      console.log('                 Paid routes will answer 503 until it recovers.');
+      console.log('                 Reads and agent registration still work.');
+    }
     console.log('');
     console.log(`  Open a market: ${formatTinybar(deposit)}  (default params)`);
     console.log(`  Post a bond:   ${formatTinybar(bond)}`);
@@ -82,4 +101,9 @@ function main(): void {
   process.on('SIGTERM', shutdown);
 }
 
-main();
+main().catch((e) => {
+  console.error(`
+  API failed to start: ${e instanceof Error ? e.message : String(e)}
+`);
+  process.exit(1);
+});

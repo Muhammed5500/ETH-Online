@@ -3,6 +3,8 @@
 
 export {
   createApp,
+  errorHandler,
+  isUpstreamFailure,
   DEFAULT_API_CONFIG,
   publicMarketView,
   resolveParams,
@@ -45,10 +47,15 @@ export {
 
 export {
   createPaymentGate,
+  DEFAULT_FACILITATOR_TIMEOUT_MS,
   hederaSpendControls,
   marketIdFromPath,
+  isPaidRoute,
+  onlyPaidRoutes,
   payWithRetry,
   SETTLEMENT_HEADER,
+  warmUpFacilitator,
+  withFacilitatorErrors,
   type PaymentGateOptions,
   type PayWithRetryOptions,
 } from './payment.js';

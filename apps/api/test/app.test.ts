@@ -386,3 +386,99 @@ describe('POST /resolve', () => {
     expect(res.body.detail).toMatch(/STEP 22/);
   });
 });
+
+describe('when the payment infrastructure is down', () => {
+  it('answers 503, not a bare 500', async () => {
+    // STEP 17 hit this for real: with the facilitator unreachable the payment
+    // middleware throws and Express answers `500 Internal Server Error`, which
+    // a caller cannot distinguish from "your request was malformed". One means
+    // fix the request, the other means wait — a client that cannot tell them
+    // apart retries the wrong one.
+    const { withFacilitatorErrors } = await import('../src/payment.js');
+    const brokenGate = withFacilitatorErrors(() => {
+      throw new Error('fetch failed');
+    }, 'https://facilitator.example');
+
+    const down = createApp({ ledger, paymentGate: brokenGate });
+    const res = await request(down.app).post('/market').send({ question: 'q' }).expect(503);
+    expect(res.body.error).toMatch(/Payment infrastructure/);
+    expect(res.body.detail).toMatch(/not a problem with your request/);
+  });
+
+  it('catches an async rejection too, which is the real middleware shape', async () => {
+    const { withFacilitatorErrors } = await import('../src/payment.js');
+    const brokenGate = withFacilitatorErrors(async () => {
+      throw new Error('fetch failed');
+    }, 'https://facilitator.example');
+    const down = createApp({ ledger, paymentGate: brokenGate });
+    await request(down.app).post('/market').send({ question: 'q' }).expect(503);
+  });
+
+  it('leaves reads working, so the ledger stays verifiable during an outage', async () => {
+    // A market already written to HCS can still be checked by anyone. There is
+    // no reason an outage in the payment rail should stop that: nobody can
+    // open a NEW market, which is right, and the record stays readable.
+    const { onlyPaidRoutes, withFacilitatorErrors } = await import('../src/payment.js');
+    const brokenGate = onlyPaidRoutes(
+      withFacilitatorErrors(async () => {
+        throw new Error('fetch failed');
+      }, 'https://facilitator.example'),
+    );
+    const down = createApp({ ledger, paymentGate: brokenGate });
+
+    await request(down.app).get('/health').expect(200);
+    await request(down.app).get('/markets').expect(200);
+    await request(down.app)
+      .post('/agents/register')
+      .send({ agentId: 'a', accountId: '0.0.1', publicKey: 'k' })
+      .expect(201);
+    // ...while the paid route correctly refuses.
+    await request(down.app).post('/market').send({ question: 'q' }).expect(503);
+  });
+
+  it('knows which routes cost money', async () => {
+    const { isPaidRoute } = await import('../src/payment.js');
+    expect(isPaidRoute('POST', '/market')).toBe(true);
+    expect(isPaidRoute('POST', '/market/mkt-1/bond')).toBe(true);
+    expect(isPaidRoute('POST', '/resolve')).toBe(true);
+
+    expect(isPaidRoute('GET', '/market/mkt-1')).toBe(false);
+    expect(isPaidRoute('GET', '/market/mkt-1/reports')).toBe(false);
+    expect(isPaidRoute('POST', '/market/mkt-1/report')).toBe(false);
+    expect(isPaidRoute('POST', '/agents/register')).toBe(false);
+    expect(isPaidRoute('GET', '/health')).toBe(false);
+  });
+});
+
+describe('errors reach the caller as something actionable', () => {
+  it('turns a next(err) from the gate into 503, not a bare 500', async () => {
+    // The gap the wrapper did not cover. Middleware can fail two ways: by
+    // throwing, which `withFacilitatorErrors` catches, or by calling
+    // `next(err)` — and that path runs straight past it into Express's default
+    // handler. STEP 17 hit exactly this and got a bodyless 500.
+    const gate: import('express').RequestHandler = (_req, _res, next) => {
+      next(new Error('fetch failed'));
+    };
+    const down = createApp({ ledger, paymentGate: gate });
+    const res = await request(down.app).post('/market').send({ question: 'q' }).expect(503);
+    expect(res.body.error).toMatch(/Upstream temporarily unavailable/);
+    expect(res.body.cause).toMatch(/fetch failed/);
+  });
+
+  it('still says 500 for a genuine bug, with the reason attached', async () => {
+    const gate: import('express').RequestHandler = () => {
+      throw new TypeError('x.y is not a function');
+    };
+    const down = createApp({ ledger, paymentGate: gate });
+    const res = await request(down.app).post('/market').send({ question: 'q' }).expect(500);
+    expect(res.body.detail).toMatch(/not a function/);
+  });
+
+  it('classifies upstream failures apart from programming errors', async () => {
+    const { isUpstreamFailure } = await import('../src/app.js');
+    expect(isUpstreamFailure(new Error('fetch failed'))).toBe(true);
+    expect(isUpstreamFailure(new Error('UND_ERR_CONNECT_TIMEOUT'))).toBe(true);
+    expect(isUpstreamFailure(new Error('no supported payment kinds loaded'))).toBe(true);
+    expect(isUpstreamFailure(new TypeError('undefined is not an object'))).toBe(false);
+  });
+});

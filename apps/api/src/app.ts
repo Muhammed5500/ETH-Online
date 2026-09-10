@@ -22,7 +22,13 @@
  * flow against testnet. The alternative — reaching for the facilitator inside
  * `createApp` — would leave every route untested until day six.
  */
-import express, { type Express, type RequestHandler, type Response } from 'express';
+import express, {
+  type Express,
+  type NextFunction,
+  type Request,
+  type RequestHandler,
+  type Response,
+} from 'express';
 import {
   assertValidParams,
   beliefFromProbability,
@@ -475,5 +481,63 @@ export function createApp(deps: AppDeps): Api {
     });
   });
 
+  // Last in the chain, so it sees everything the routes and the payment gate
+  // hand off. Express's default handler answers a bare `500 Internal Server
+  // Error` with no body, which tells a caller nothing about whether to fix
+  // the request or simply retry.
+  app.use(errorHandler);
+
   return { app, registry, markets, config };
 }
+
+/** Network-level failures, which mean "try again", not "you did it wrong". */
+const TRANSIENT_PATTERNS: readonly RegExp[] = [
+  /fetch failed/i,
+  /ECONNRESET/i,
+  /ETIMEDOUT/i,
+  /ENOTFOUND/i,
+  /EAI_AGAIN/i,
+  /socket hang up/i,
+  /UND_ERR_CONNECT_TIMEOUT/i,
+  /timeout/i,
+  /facilitator/i,
+  /no supported payment kinds/i,
+];
+
+export function isUpstreamFailure(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  return TRANSIENT_PATTERNS.some((p) => p.test(message));
+}
+
+/**
+ * Turns an unhandled error into an answer a client can act on.
+ *
+ * WHY IT EXISTS, AND WHY THE WRAPPER AROUND THE GATE WAS NOT ENOUGH. Middleware
+ * has two ways to fail: it can throw or reject, which `withFacilitatorErrors`
+ * catches, or it can call `next(err)` — and that route goes straight past the
+ * wrapper into Express's default handler and comes back as a bare 500. STEP 17
+ * hit exactly that: an unreachable facilitator produced a 500 with no body,
+ * indistinguishable from a malformed request.
+ *
+ * A caller has to be able to tell "fix your request" (4xx) from "the machinery
+ * is having a moment, retry" (503), because those call for opposite responses.
+ */
+export const errorHandler = (
+  err: unknown,
+  _req: Request,
+  res: Response,
+  next: NextFunction,
+): void => {
+  if (res.headersSent) return next(err);
+  const message = err instanceof Error ? err.message : String(err);
+
+  if (isUpstreamFailure(err)) {
+    res.status(503).json({
+      error: 'Upstream temporarily unavailable',
+      detail: 'The payment or ledger backend could not be reached. Retry shortly.',
+      cause: message.slice(0, 200),
+    });
+    return;
+  }
+  res.status(500).json({ error: 'Internal error', detail: message.slice(0, 200) });
+};

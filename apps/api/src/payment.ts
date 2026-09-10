@@ -29,7 +29,23 @@ export interface PaymentGateOptions {
   readonly defaultParams: MarketParams;
   readonly hbarPerUnit: number;
   readonly resolvePriceTinybar?: bigint;
+  /**
+   * Per-request timeout for facilitator calls.
+   *
+   * The library default is ten seconds, which is tight for a payment rail. It
+   * covers the handshake as well as the call, so on a slow or congested link
+   * the client gives up before the facilitator has even answered — and every
+   * paid route then fails for a reason that has nothing to do with payments.
+   * Measured during STEP 17 on a degraded connection: TLS handshake alone took
+   * 11-14 seconds, consistently, and no payment could be made at all.
+   *
+   * Thirty seconds by default, and configurable, so a deployment on a slow
+   * link is merely slow rather than broken.
+   */
+  readonly facilitatorTimeoutMs?: number;
 }
+
+export const DEFAULT_FACILITATOR_TIMEOUT_MS = 30_000;
 
 /**
  * Anything with a parsed body, if the adapter offers one.
@@ -50,7 +66,10 @@ export function marketIdFromPath(path: string): string | undefined {
 }
 
 export function createPaymentGate(opts: PaymentGateOptions): RequestHandler {
-  const facilitator = new HTTPFacilitatorClient({ url: opts.facilitatorUrl });
+  const facilitator = new HTTPFacilitatorClient({
+    url: opts.facilitatorUrl,
+    timeoutMs: opts.facilitatorTimeoutMs ?? DEFAULT_FACILITATOR_TIMEOUT_MS,
+  });
 
   const routes: RoutesConfig = {
     'POST /market': {
@@ -112,9 +131,85 @@ export function createPaymentGate(opts: PaymentGateOptions): RequestHandler {
 
   // The server-side scheme. SPIKE A: this is `@x402/hedera/exact/server`,
   // which is a different export from the client-side scheme of the same name.
-  return paymentMiddlewareFromConfig(routes, facilitator, [
+  const middleware = paymentMiddlewareFromConfig(routes, facilitator, [
     { network: HEDERA_TESTNET_CAIP2, server: new ExactHederaScheme() },
   ]) as unknown as RequestHandler;
+
+  return onlyPaidRoutes(withFacilitatorErrors(middleware, opts.facilitatorUrl));
+}
+
+/** The three routes that cost money. Everything else never touches the gate. */
+const PAID_ROUTES: ReadonlyArray<{ method: string; pattern: RegExp }> = [
+  { method: 'POST', pattern: /^\/market\/?$/ },
+  { method: 'POST', pattern: /^\/market\/[^/]+\/bond\/?$/ },
+  { method: 'POST', pattern: /^\/resolve\/?$/ },
+];
+
+export function isPaidRoute(method: string, path: string): boolean {
+  const clean = path.split('?')[0] ?? path;
+  return PAID_ROUTES.some((r) => r.method === method.toUpperCase() && r.pattern.test(clean));
+}
+
+/**
+ * Runs the payment gate only for requests that actually cost money.
+ *
+ * WHY THIS MATTERS BEYOND TIDINESS. Mounted globally, a payment gate that
+ * cannot reach its facilitator takes the read endpoints down with it — and
+ * those are exactly the ones that should survive. A market already written to
+ * HCS can still be verified by anyone; there is no reason an outage in the
+ * payment rail should stop that. Nobody can open a NEW market, which is
+ * correct, and everything already on the record stays readable.
+ */
+export function onlyPaidRoutes(middleware: RequestHandler): RequestHandler {
+  return (req, res, next) => {
+    if (!isPaidRoute(req.method, req.path)) return next();
+    return middleware(req, res, next);
+  };
+}
+
+/**
+ * Turns "the payment infrastructure is unreachable" into a 503 that says so.
+ *
+ * Found the hard way during STEP 17: with the facilitator unreachable, the
+ * middleware throws while loading its supported payment kinds and Express
+ * answers a bare `500 Internal Server Error`. From the caller's side that is
+ * indistinguishable from a malformed request — and for a paid API the
+ * difference matters a great deal. One means "fix your request", the other
+ * means "wait and try again"; a client that cannot tell them apart will retry
+ * the wrong one.
+ *
+ * 503 is the honest code: the service is temporarily unable to handle the
+ * request, and the fault is not the caller's.
+ */
+export function withFacilitatorErrors(
+  middleware: RequestHandler,
+  facilitatorUrl: string,
+): RequestHandler {
+  return (req, res, next) => {
+    const fail = (e: unknown): void => {
+      if (res.headersSent) return;
+      const message = e instanceof Error ? e.message : String(e);
+      res.status(503).json({
+        error: 'Payment infrastructure unavailable',
+        detail:
+          `Could not reach the x402 facilitator at ${facilitatorUrl}. ` +
+          `This is not a problem with your request — retry shortly.`,
+        cause: message.slice(0, 200),
+      });
+    };
+
+    // Both shapes have to be caught. The x402 middleware is async, so it
+    // rejects; but a middleware that throws synchronously would sail straight
+    // past a promise-only guard and Express would answer 500 after all.
+    try {
+      const result = middleware(req, res, next) as unknown;
+      if (result && typeof (result as PromiseLike<unknown>).then === 'function') {
+        void (result as Promise<unknown>).catch(fail);
+      }
+    } catch (e) {
+      fail(e);
+    }
+  };
 }
 
 function safePrior(raw: unknown): ReturnType<typeof resolvePrior> {
@@ -196,8 +291,10 @@ export async function payWithRetry(
   let last: Response | undefined;
   for (let attempt = 1; attempt <= attempts; attempt++) {
     const res = await doRequest();
-    // Anything but "payment required" is a real answer, success or otherwise.
-    if (res.status !== 402) return res;
+    // 402 means the payment did not settle; 503 is our own "the payment rail
+    // is temporarily unreachable, retry shortly". Both are worth another go.
+    // Anything else is a real answer, success or otherwise.
+    if (res.status !== 402 && res.status !== 503) return res;
     last = res;
 
     if (opts.alreadyDone && (await opts.alreadyDone())) return res;
@@ -208,4 +305,43 @@ export async function payWithRetry(
     await sleep(delay);
   }
   return last!;
+}
+
+/**
+ * Opens a connection to the facilitator before the server takes traffic.
+ *
+ * WHY. The x402 resource server loads its supported payment kinds on first
+ * use, with a ten-second timeout. In a cold process the very first outbound
+ * HTTPS connection is the slowest one it will ever make — DNS, TLS, the lot —
+ * and it can blow through that budget. The cost then lands on whoever happens
+ * to send the first paid request, which is exactly the wrong person to charge
+ * for it. Measured during STEP 17: first connection 14s, every one after it
+ * under half a second.
+ *
+ * So we pay the cold-start ourselves, at boot, where it is free. It also turns
+ * "the facilitator is down" into something the operator learns at startup
+ * rather than from a customer.
+ *
+ * Never throws: an unreachable facilitator is worth reporting, not worth
+ * refusing to start over. The read endpoints work without it.
+ */
+export async function warmUpFacilitator(
+  facilitatorUrl: string,
+  timeoutMs = 30_000,
+): Promise<{ ok: boolean; ms: number; error?: string }> {
+  const started = Date.now();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(`${facilitatorUrl}/supported`, { signal: controller.signal });
+    return { ok: res.ok, ms: Date.now() - started };
+  } catch (e) {
+    return {
+      ok: false,
+      ms: Date.now() - started,
+      error: e instanceof Error ? e.message : String(e),
+    };
+  } finally {
+    clearTimeout(timer);
+  }
 }

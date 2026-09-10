@@ -1531,3 +1531,131 @@ düşünülmeli — ya parça sonuçları kalıcı olarak kaydedilmeli ya da set
 idempotent hale getirilmeli.
 
 ADIM 4 (ENS spike) hâlâ açık.
+
+---
+
+## ADIM 17 — Hedera Uçtan Uca Entegrasyon Testi
+
+- **Tarih:** 2026-09-10
+- **Durum:** KISMEN GEÇTİ — test yazıldı ve tamamlandı, iki testin ikisi de
+  zincirde ayrı ayrı geçti, ama **aynı koşuda ikisi birden yeşil olmadı.**
+  Engelleyen şey kod değil, ağ.
+- **Test:** 2 entegrasyon testi + 6 birim testi (hata yolları)
+- **Tam suite:** 387/387 yeşil, build temiz
+
+### Ne yazıldı
+
+`apps/api/test/e2e-hedera.integration.test.ts` — ROADMAP'in istediği her şeyi
+kapsıyor:
+
+| İstenen | Durum |
+|---|---|
+| Asker x402 ile öder, market açılır | ✓ zincirde doğrulandı |
+| 20 agent bond yatırır | ✓ |
+| Turlar çalışır, market kapanır | ✓ |
+| Settlement yürütülür, bakiyeler kontrol edilir | ✓ hazine deltası = slash |
+| HCS mesaj sayısı = rapor + 3 | ✓ |
+| Her durma kararı `verifyStoppingDecision` ile doğrulanır | ✓ |
+| Timeout senaryosu, durma zarının atlanmadığı | ✓ zincirde doğrulandı |
+
+`apps/api/test/e2e-harness.ts` — testnet iskelesi. Kimlik bilgisi yoksa test
+temiz şekilde atlıyor: çalışamayan bir entegrasyon testi başarısızlık değil.
+
+### KOŞU GEÇMİŞİ — dürüst kayıt
+
+| Koşu | Test 1 (tam market) | Test 2 (timeout) |
+|---|---|---|
+| A | ✓ 84 sn | ✗ (testim deterministik değildi) |
+| B | ✗ 500 | ✗ 500 |
+| C | ✓ | ✗ 500 |
+| D | ✗ 500 | ✓ 220 sn |
+
+**İkisi de gerçek testnet'te geçti, ama hiç aynı koşuda değil.** Kalan bütün
+hatalar market açılışında 500 ve hepsi ağ kaynaklı.
+
+### Engelleyen şey ölçüldü
+
+```
+facilitator (api.testnet.blocky402.com):  connect 10-14 sn  (sabah 0.4 sn'ydi)
+hedera mirror node:                        connect 0.12 sn
+check:hedera (normalde ~15 sn):            1 dk 27 sn
+```
+
+Yani genel bir internet kesintisi değil, **özellikle facilitator'a giden yolun
+gecikmesi.** Bu makineden, bugün.
+
+### VE BU YOLDA ÜÇ GERÇEK EKSİK BULUNDU
+
+Ağ arızası kendi başına bir bulgu değil; bulgu, arızanın koda neyi
+gösterdiği.
+
+**1. Kesin sınır: `@x402/express` 500'ü kendisi yazıyor.**
+
+```js
+// @x402/express dist, satır 146
+res.status(500).json({ error: "Internal Server Error" });
+```
+
+Facilitator'a ulaşılamayınca middleware yanıtı doğrudan gönderiyor. Header'lar
+çıktığı için **ne bir wrapper ne bir Express error handler araya girebiliyor.**
+Kütüphane sınırı, uygulama katmanından düzeltilemez.
+
+Yapılabilecek olan yapıldı: açılışta ısıtma, açılışta net rapor, ayarlanabilir
+zaman aşımı, istemci tarafında tekrar deneme. README'de belirtilmeli — bir
+facilitator kesintisi çıplak 500 olarak görünür.
+
+**2. `next(err)` yolu açıktaydı.**
+
+`withFacilitatorErrors` fırlatılan ve reddedilen hatayı yakalıyordu ama
+middleware `next(err)` çağırırsa hata doğrudan Express'in varsayılan
+işleyicisine gidiyor ve gövdesiz bir 500 dönüyordu.
+
+`errorHandler` eklendi: ağ kaynaklı hatalar 503, gerçek programlama hataları
+sebebiyle birlikte 500. Çağıran "isteğini düzelt" ile "makine takıldı, tekrar
+dene" arasını ayırt edebilmeli — ikisi zıt tepki gerektiriyor.
+
+**3. Ödeme kapısı bütün route'ların önündeydi.**
+
+Global mount edilmiş bir ödeme kapısı, facilitator'a ulaşamayınca **okuma
+uçlarını da beraberinde götürüyordu** — oysa hayatta kalması gereken tam
+onlar. Zincire yazılmış bir market hâlâ herkesçe doğrulanabilmeli.
+
+`onlyPaidRoutes` eklendi: kapı sadece para isteyen üç route için çalışıyor.
+Kesinti sırasında yeni market açılamıyor (doğru), ama kayıt okunabilir kalıyor.
+
+### Ayrıca: facilitator zaman aşımı ayarlanabilir oldu
+
+Kütüphane varsayılanı 10 sn ve el sıkışmayı da kapsıyor. Yavaş bir hatta
+istemci, facilitator daha cevap vermeden vazgeçiyor ve bütün ödemeli route'lar
+ödemeyle ilgisi olmayan bir sebeple düşüyor. Varsayılan 30 sn'ye çekildi,
+`FACILITATOR_TIMEOUT_MS` ile ayarlanabilir.
+
+Bu değişiklikle 500'ler 502'ye döndü (yani ödeme geçti, Hedera çağrısı
+takıldı) — ilerleme ölçülebilir oldu.
+
+### Test kurgusu hatam: rastgeleliğe bağlı iddia
+
+İlk timeout testinde **tek** bir agent'ı susturup slash edilmesini bekledim.
+Ama çekiliş rastgele ve α=1/3 ile market ~3 turda kapanıyor; o agent hiç
+çekilmeyebiliyor. Yazı-tura sonucuna bağlı bir test, testsizlikten kötüdür.
+
+Yeniden kurdum: **bütün** agent'lar susuyor. İddia artık tam:
+- 5 çekiliş, 5 timeout, 0 rapor
+- **0 durma zarı** — testin var olma sebebi olan özellik
+- market `pool-exhausted` ile kapanıyor
+- dejenere settlement: referans yok, ödeme yok, bütün bond'lar slash, hepsi
+  askere
+
+"Timeout sonrası market devam eder" yolu birim testlerinde zaten deterministik
+olarak kapsanıyor.
+
+### Kalan iş
+
+Ağ toparladığında `pnpm test:integration` tek koşuda yeşil görülmeli. Kod
+tarafında bilinen bir eksik yok; her iki test de ayrı ayrı zincirde geçti.
+
+ADIM 16'da not düşülen iki kısıt duruyor: transfer parçaları birbirine göre
+atomik değil, ve settlement kısmi bir başarısızlıktan sonra tekrar
+çalıştırılırsa ödenmiş parçalar yeniden ödenir.
+
+ADIM 4 (ENS spike) hâlâ açık.
