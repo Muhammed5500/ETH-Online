@@ -35,7 +35,8 @@ export type HcsMessageType =
   | 'report'
   | 'timeout'
   | 'market-close'
-  | 'settlement';
+  | 'settlement'
+  | 'settlement-chunk';
 
 interface HcsBase {
   readonly v: typeof HCS_MESSAGE_VERSION;
@@ -103,12 +104,45 @@ export interface SettlementMessage extends HcsBase {
   };
 }
 
+/**
+ * One chunk of a settlement, recorded as it is attempted.
+ *
+ * WHY THE LEDGER CARRIES THIS AND NOT JUST THE SETTLEMENT. Hedera caps how
+ * many accounts one transfer may touch, so paying twenty agents takes several
+ * transactions and those transactions are not atomic with respect to each
+ * other. A settlement can therefore stop halfway, and when it does, the one
+ * question that matters is which chunks actually moved money.
+ *
+ * Keeping that answer only in the orchestrator's memory would mean a restart
+ * loses it, and a settlement re-run after a restart would pay the early chunks
+ * a second time. Here it is on the public record instead: durable, ordered by
+ * consensus, and checkable by anyone against HashScan.
+ *
+ * `unknown` is a real outcome and not a synonym for failure. When a transfer
+ * throws we do not know whether it landed, and treating that as "did not land"
+ * is exactly the assumption that pays twice.
+ */
+export interface SettlementChunkMessage extends HcsBase {
+  readonly type: 'settlement-chunk';
+  readonly chunkIndex: number;
+  readonly chunkCount: number;
+  readonly lineCount: number;
+  /** Total credited by this chunk, in tinybar. A string because it is a uint64. */
+  readonly amountTinybar: string;
+  readonly outcome: 'sent' | 'unknown' | 'resolved-paid' | 'resolved-unpaid';
+  readonly transactionId?: string;
+  readonly status?: string;
+  /** What was checked, when a person resolved an `unknown` outcome. */
+  readonly evidence?: string;
+}
+
 export type HcsMessage =
   | MarketOpenMessage
   | ReportMessage
   | TimeoutMessage
   | MarketCloseMessage
-  | SettlementMessage;
+  | SettlementMessage
+  | SettlementChunkMessage;
 
 /** Field order per message type. Fixed, so encoding is reproducible. */
 const FIELD_ORDER: Record<HcsMessageType, readonly string[]> = {
@@ -117,6 +151,20 @@ const FIELD_ORDER: Record<HcsMessageType, readonly string[]> = {
   timeout: ['v', 'type', 'marketId', 'ts', 'position', 'agentId'],
   'market-close': ['v', 'type', 'marketId', 'ts', 'reason', 'reportCount', 'reference'],
   settlement: ['v', 'type', 'marketId', 'ts', 'reference', 'payouts', 'totals'],
+  'settlement-chunk': [
+    'v',
+    'type',
+    'marketId',
+    'ts',
+    'chunkIndex',
+    'chunkCount',
+    'lineCount',
+    'amountTinybar',
+    'outcome',
+    'transactionId',
+    'status',
+    'evidence',
+  ],
 };
 
 /** UTF-8 byte length, which is what Hedera counts. */
@@ -263,6 +311,27 @@ export function decodeHcsMessage(raw: string): HcsMessage {
         throw new Error('settlement "reference" must be a two-number belief when present.');
       }
       return o as unknown as SettlementMessage;
+    }
+    case 'settlement-chunk': {
+      if (typeof o['chunkIndex'] !== 'number' || o['chunkIndex'] < 0) {
+        throw new Error('settlement-chunk needs a non-negative "chunkIndex".');
+      }
+      if (typeof o['chunkCount'] !== 'number' || o['chunkCount'] < 1) {
+        throw new Error('settlement-chunk needs a "chunkCount" of at least 1.');
+      }
+      if (typeof o['lineCount'] !== 'number') throw new Error('settlement-chunk needs "lineCount".');
+      if (typeof o['amountTinybar'] !== 'string' || !/^\d+$/.test(o['amountTinybar'])) {
+        throw new Error('settlement-chunk "amountTinybar" must be a decimal integer string.');
+      }
+      if (
+        o['outcome'] !== 'sent' &&
+        o['outcome'] !== 'unknown' &&
+        o['outcome'] !== 'resolved-paid' &&
+        o['outcome'] !== 'resolved-unpaid'
+      ) {
+        throw new Error(`settlement-chunk has an unknown "outcome": ${String(o['outcome'])}`);
+      }
+      return o as unknown as SettlementChunkMessage;
     }
     default:
       throw new Error(`Unknown HCS message type: ${String(o['type'])}`);

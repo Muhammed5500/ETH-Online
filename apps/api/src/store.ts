@@ -15,6 +15,7 @@
  */
 import type { Belief, Market, MarketParams } from '@ethonline/core';
 import type { HcsRandomSource } from '@ethonline/hedera';
+import type { SettlementProgress } from './settlement-progress.js';
 
 export interface RegisteredAgent {
   readonly agentId: string;
@@ -53,6 +54,15 @@ export interface StoredMarket {
   readonly createdAt: number;
   readonly bondingClosesAt: number;
   readonly bonds: Map<string, BondRecord>;
+  /**
+   * Set on the first settlement attempt, then never recomputed.
+   *
+   * Mutable, unlike everything above it, because a settlement is the one thing
+   * here that happens in stages: chunks are paid one transaction at a time and
+   * the record of which ones landed has to survive between them. See
+   * `settlement-progress.ts` for why re-deriving it instead would pay twice.
+   */
+  settlementProgress?: SettlementProgress;
 }
 
 export class AgentRegistry {

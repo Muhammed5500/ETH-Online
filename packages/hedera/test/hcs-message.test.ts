@@ -213,3 +213,92 @@ describe('decodeHcsMessage validation', () => {
     expect(() => decodeHcsMessage('[]')).toThrow(/must be a JSON object/);
   });
 });
+
+describe('settlement-chunk', () => {
+  const chunk = {
+    v: 1 as const,
+    type: 'settlement-chunk' as const,
+    marketId: 'mkt-2026-09-10-001',
+    ts: 1789001234,
+    chunkIndex: 1,
+    chunkCount: 7,
+    lineCount: 3,
+    amountTinybar: '300000000',
+    outcome: 'sent' as const,
+    transactionId: '0.0.7@1789001200.000000001',
+    status: 'SUCCESS',
+  };
+
+  it('round trips', () => {
+    const decoded = decodeHcsMessage(encodeHcsMessage(chunk));
+    expect(decoded).toEqual(chunk);
+  });
+
+  it('keeps the amount a string', () => {
+    // It is a uint64. Through a JSON number it would become a float and, above
+    // 2^53, a different number than the one that was paid.
+    const encoded = encodeHcsMessage(chunk);
+    expect(encoded).toContain('"amountTinybar":"300000000"');
+  });
+
+  it('fits in one message even with a long resolution note', () => {
+    // One chunk, one sequence number. A split receipt would be two entries
+    // claiming to describe one payment.
+    const withEvidence = {
+      ...chunk,
+      outcome: 'resolved-paid' as const,
+      evidence: 'x'.repeat(200),
+    };
+    expect(() => assertFitsSingleMessage(encodeHcsMessage(withEvidence))).not.toThrow();
+  });
+
+  it('accepts every outcome the settlement can produce', () => {
+    for (const outcome of ['sent', 'unknown', 'resolved-paid', 'resolved-unpaid'] as const) {
+      expect(decodeHcsMessage(encodeHcsMessage({ ...chunk, outcome })).type).toBe(
+        'settlement-chunk',
+      );
+    }
+  });
+
+  it('rejects an outcome it does not recognise', () => {
+    const bad = { ...chunk, outcome: 'probably-fine' };
+    expect(() => decodeHcsMessage(JSON.stringify(bad))).toThrow(/unknown "outcome"/);
+  });
+
+  it('rejects an amount that is not a decimal integer string', () => {
+    // A float here would mean somebody put a number through JSON after all.
+    expect(() => decodeHcsMessage(JSON.stringify({ ...chunk, amountTinybar: 300000000 }))).toThrow(
+      /decimal integer string/,
+    );
+    expect(() => decodeHcsMessage(JSON.stringify({ ...chunk, amountTinybar: '3.5' }))).toThrow(
+      /decimal integer string/,
+    );
+  });
+
+  it('rejects a chunk index or count that cannot be real', () => {
+    expect(() => decodeHcsMessage(JSON.stringify({ ...chunk, chunkIndex: -1 }))).toThrow(
+      /chunkIndex/,
+    );
+    expect(() => decodeHcsMessage(JSON.stringify({ ...chunk, chunkCount: 0 }))).toThrow(
+      /chunkCount/,
+    );
+  });
+
+  it('drops absent optional fields rather than writing nulls', () => {
+    const minimal = {
+      v: 1 as const,
+      type: 'settlement-chunk' as const,
+      marketId: 'm',
+      ts: 1,
+      chunkIndex: 0,
+      chunkCount: 1,
+      lineCount: 2,
+      amountTinybar: '1',
+      outcome: 'unknown' as const,
+    };
+    const encoded = encodeHcsMessage(minimal);
+    expect(encoded).not.toContain('transactionId');
+    expect(encoded).not.toContain('null');
+    expect(decodeHcsMessage(encoded)).toEqual(minimal);
+  });
+});

@@ -62,6 +62,7 @@ export {
 
 export {
   Orchestrator,
+  SettlementBlockedError,
   type AgentReportResponse,
   type AgentTransport,
   type OrchestratorDeps,
@@ -80,5 +81,18 @@ export {
   type TransferLine,
   type TransferPlan,
 } from './settlement-plan.js';
+
+export {
+  chunkAmount,
+  createProgress,
+  describeProgress,
+  nextChunks,
+  resolveChunk,
+  summarize,
+  type ChunkRecord,
+  type ChunkState,
+  type ProgressSummary,
+  type SettlementProgress,
+} from './settlement-progress.js';
 
 export { hederaPayer, httpAgentTransport, type HederaPayerOptions } from './transport.js';

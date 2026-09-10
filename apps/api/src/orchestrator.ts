@@ -41,6 +41,16 @@ import {
   type TransferLine,
   type TransferPlan,
 } from './settlement-plan.js';
+import {
+  createProgress,
+  describeProgress,
+  nextChunks,
+  resolveChunk,
+  summarize,
+  type ChunkRecord,
+  type ProgressSummary,
+  type SettlementProgress,
+} from './settlement-progress.js';
 import type { AgentRegistry, MarketStore, StoredMarket, RegisteredAgent } from './store.js';
 
 export interface ReportRequest {
@@ -88,7 +98,28 @@ export interface RoundResult {
 export interface SettlementResult {
   readonly settlement: Settlement;
   readonly plan: TransferPlan;
+  /** Receipts from chunks paid in THIS call. A resume returns only its own. */
   readonly receipts: readonly PayerReceipt[];
+  readonly progress: ProgressSummary;
+}
+
+/**
+ * Raised when a settlement cannot continue without a person looking at the
+ * chain.
+ *
+ * Carries the progress so a caller can print exactly which chunks landed,
+ * which did not, and which are in neither state.
+ */
+export class SettlementBlockedError extends Error {
+  constructor(
+    message: string,
+    readonly marketId: string,
+    readonly progress: ProgressSummary,
+    readonly unresolved: readonly ChunkRecord[],
+  ) {
+    super(message);
+    this.name = 'SettlementBlockedError';
+  }
 }
 
 export interface OrchestratorDeps {
@@ -307,20 +338,67 @@ export class Orchestrator {
   }
 
   /**
-   * Settles: computes payouts, records them, then moves the money.
+   * Settles: computes payouts once, records them, then moves the money in
+   * chunks that are tracked individually.
    *
-   * The ledger entry is written BEFORE the transfers. If a transfer fails, the
-   * settlement that was supposed to happen is already on the public record and
-   * can be checked against what actually moved. The other order would let a
-   * partial payout exist with nothing saying what it should have been.
+   * THE ORDER, AND WHY EACH STEP IS WHERE IT IS.
+   *
+   *   The settlement message goes to HCS BEFORE any transfer. If a transfer
+   *   then fails, what was supposed to happen is already on the public record
+   *   and can be compared against what actually moved. The other order would
+   *   let a partial payout exist with nothing saying what it should have been.
+   *
+   *   The plan is computed ONLY on the first attempt and then kept. A resumed
+   *   settlement reuses it, so the chunks it skips and the chunks it pays are
+   *   provably the same chunks. Recomputing would make "already paid" a claim
+   *   about a plan that no longer exists.
+   *
+   *   Each chunk's outcome is written to HCS as it happens. Memory does not
+   *   survive a restart, and a restart is exactly when a re-run happens.
+   *
+   * SAFE TO CALL AGAIN. On a settled market this returns what was already done
+   * without moving anything. After a partial failure it resumes: sent chunks
+   * are skipped, pending ones are paid.
+   *
+   * A CHUNK THAT THREW IS `unknown`, NOT FAILED. We do not know whether it
+   * landed. Assuming it did not is the assumption that pays twice, so the
+   * settlement stops there and waits for a person who has looked at the
+   * treasury's history — see `resolveSettlementChunk`.
    */
   async settle(marketId: string, askerAccountId: string): Promise<SettlementResult> {
     const stored = this.require(marketId);
     const state = stored.market.getState();
+
+    if (state.status === 'settled' && stored.settlementProgress) {
+      // Already done. Returning the record beats throwing: a caller retrying
+      // after a lost response should learn that nothing is owed, rather than
+      // get an error that invites another attempt.
+      const done = stored.settlementProgress;
+      this.emit('settle-noop', { marketId, reason: 'already settled' });
+      return {
+        settlement: done.settlement,
+        plan: done.plan,
+        receipts: [],
+        progress: summarize(done),
+      };
+    }
+
     if (state.status !== 'closed') {
       throw new Error(`Market ${marketId} is ${state.status}; only a closed market settles.`);
     }
 
+    const progress =
+      stored.settlementProgress ?? (await this.beginSettlement(stored, askerAccountId));
+
+    return this.drainChunks(stored, progress);
+  }
+
+  /** First attempt only: compute the plan, put it on the record, keep it. */
+  private async beginSettlement(
+    stored: StoredMarket,
+    askerAccountId: string,
+  ): Promise<SettlementProgress> {
+    const state = stored.market.getState();
     const depositUnits = requiredDeposit(stored.params, stored.prior);
     const settlement = computeSettlement(state, { deposit: depositUnits });
 
@@ -329,7 +407,7 @@ export class Orchestrator {
 
     const drawn = new Set(state.drawnAgents);
     const plan = buildTransferPlan({
-      marketId,
+      marketId: stored.id,
       settlement,
       params: stored.params,
       hbarPerUnit: this.deps.hbarPerUnit,
@@ -343,7 +421,7 @@ export class Orchestrator {
     await this.deps.ledger.append(stored.topicId, {
       v: 1,
       type: 'settlement',
-      marketId,
+      marketId: stored.id,
       ts: this.now(),
       ...(settlement.reference ? { reference: settlement.reference } : {}),
       payouts: settlement.payouts.map(
@@ -361,21 +439,167 @@ export class Orchestrator {
       },
     });
 
-    const receipts: PayerReceipt[] = [];
     const chunks = chunkPlan(plan, this.deps.maxCreditsPerTransaction ?? 9);
-    for (const [i, chunk] of chunks.entries()) {
-      receipts.push(await this.deps.payer.send(chunk, `${marketId} settlement ${i + 1}/${chunks.length}`));
+    const progress = createProgress(stored.id, settlement, plan, chunks, this.now());
+    stored.settlementProgress = progress;
+    this.emit('settlement-planned', {
+      marketId: stored.id,
+      lines: plan.lines.length,
+      chunks: chunks.length,
+      totalOut: plan.totalOutTinybar.toString(),
+    });
+    return progress;
+  }
+
+  /** Pays every pending chunk, stopping at the first one that does not confirm. */
+  private async drainChunks(
+    stored: StoredMarket,
+    progress: SettlementProgress,
+  ): Promise<SettlementResult> {
+    const receipts: PayerReceipt[] = [];
+    const pending = nextChunks(progress);
+
+    if (pending.length === 0 && summarize(progress).blocked) {
+      this.blockedThrow(stored.id, progress);
     }
 
-    stored.market.markSettled();
+    for (const chunk of pending) {
+      const memo = `${stored.id} settlement ${chunk.index + 1}/${progress.chunks.length}`;
+      chunk.attemptedAt = this.now();
+
+      let receipt: PayerReceipt;
+      try {
+        receipt = await this.deps.payer.send(chunk.lines, memo);
+      } catch (e) {
+        // Not "failed". We do not know whether it landed, and deciding that it
+        // did not is exactly what pays twice.
+        chunk.state = 'unknown';
+        chunk.error = (e as Error).message;
+        await this.writeChunkOutcome(stored, progress, chunk, 'unknown');
+        this.emit('settlement-chunk-unknown', {
+          marketId: stored.id,
+          chunk: chunk.index,
+          error: chunk.error,
+        });
+        this.blockedThrow(stored.id, progress);
+      }
+
+      chunk.state = 'sent';
+      chunk.transactionId = receipt.transactionId;
+      chunk.status = receipt.status;
+      receipts.push(receipt);
+      await this.writeChunkOutcome(stored, progress, chunk, 'sent');
+      this.emit('settlement-chunk-sent', {
+        marketId: stored.id,
+        chunk: chunk.index,
+        transactionId: receipt.transactionId,
+        amount: chunk.amountTinybar.toString(),
+      });
+    }
+
+    const summary = summarize(progress);
+    if (!summary.complete) this.blockedThrow(stored.id, progress);
+
+    if (stored.market.status === 'closed') stored.market.markSettled();
     this.emit('settled', {
-      marketId,
-      lines: plan.lines.length,
-      totalOut: plan.totalOutTinybar.toString(),
-      transactions: receipts.length,
+      marketId: stored.id,
+      lines: progress.plan.lines.length,
+      totalOut: progress.plan.totalOutTinybar.toString(),
+      transactions: summary.sent,
     });
 
-    return { settlement, plan, receipts };
+    return { settlement: progress.settlement, plan: progress.plan, receipts, progress: summary };
+  }
+
+  private blockedThrow(marketId: string, progress: SettlementProgress): never {
+    const summary = summarize(progress);
+    const unresolved = progress.chunks.filter((c) => c.state === 'unknown');
+    throw new SettlementBlockedError(
+      `Settlement of ${marketId} cannot continue: ${describeProgress(progress)}. ` +
+        `A chunk whose outcome is unknown may or may not have moved money. Check the ` +
+        `treasury's transactions on HashScan against the settlement message on the market's ` +
+        `topic, then call resolveSettlementChunk() with what you found. Re-running settle() ` +
+        `will NOT retry it, because retrying an unknown payment is how it gets paid twice.`,
+      marketId,
+      summary,
+      unresolved,
+    );
+  }
+
+  /**
+   * Puts a chunk's outcome on the topic.
+   *
+   * Never throws. A failure to record must not undo what the money already
+   * did: throwing here would lose the in-memory state that says the chunk was
+   * paid, and the next resume would pay it a second time. Losing a receipt
+   * costs auditability, which is the cheaper of the two.
+   */
+  private async writeChunkOutcome(
+    stored: StoredMarket,
+    progress: SettlementProgress,
+    chunk: ChunkRecord,
+    outcome: 'sent' | 'unknown' | 'resolved-paid' | 'resolved-unpaid',
+  ): Promise<void> {
+    const message: HcsMessage = {
+      v: 1,
+      type: 'settlement-chunk',
+      marketId: stored.id,
+      ts: this.now(),
+      chunkIndex: chunk.index,
+      chunkCount: progress.chunks.length,
+      lineCount: chunk.lines.length,
+      amountTinybar: chunk.amountTinybar.toString(),
+      outcome,
+      ...(chunk.transactionId ? { transactionId: chunk.transactionId } : {}),
+      ...(chunk.status ? { status: chunk.status } : {}),
+      ...(chunk.resolution ? { evidence: chunk.resolution.slice(0, 200) } : {}),
+    };
+    try {
+      await this.deps.ledger.append(stored.topicId, message);
+    } catch (e) {
+      this.emit('settlement-chunk-unrecorded', {
+        marketId: stored.id,
+        chunk: chunk.index,
+        outcome,
+        error: (e as Error).message,
+      });
+    }
+  }
+
+  /**
+   * Records what a person found when they checked an `unknown` chunk.
+   *
+   * `paid` marks it sent, so the next `settle()` skips it. `not-paid` puts it
+   * back to pending, so the next `settle()` pays it. Either way the decision
+   * goes on the public record next to the payment it explains.
+   */
+  async resolveSettlementChunk(
+    marketId: string,
+    index: number,
+    outcome: 'paid' | 'not-paid',
+    evidence: string,
+  ): Promise<ProgressSummary> {
+    const stored = this.require(marketId);
+    const progress = stored.settlementProgress;
+    if (!progress) {
+      throw new Error(`Market ${marketId} has no settlement to resolve; settle() has not run.`);
+    }
+
+    const chunk = resolveChunk(progress, index, outcome, evidence);
+    await this.writeChunkOutcome(
+      stored,
+      progress,
+      chunk,
+      outcome === 'paid' ? 'resolved-paid' : 'resolved-unpaid',
+    );
+    this.emit('settlement-chunk-resolved', { marketId, chunk: index, outcome, evidence });
+    return summarize(progress);
+  }
+
+  /** Where a settlement stands, or undefined if it has not been started. */
+  settlementProgress(marketId: string): ProgressSummary | undefined {
+    const progress = this.require(marketId).settlementProgress;
+    return progress ? summarize(progress) : undefined;
   }
 }
 

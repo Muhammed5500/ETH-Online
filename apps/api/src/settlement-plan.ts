@@ -135,6 +135,17 @@ export function buildTransferPlan(input: PlanInput): TransferPlan {
     );
   }
 
+  // THE ASKER GOES LAST, AND THAT ORDERING IS LOAD-BEARING.
+  //
+  // Hedera caps how many accounts one transfer may touch, so this plan is paid
+  // as several transactions that are not atomic with respect to each other. A
+  // settlement can therefore stop partway through, and whoever sits in the
+  // unpaid tail is the one left waiting.
+  //
+  // Agents are strangers whose bonds are locked until they are paid; the asker
+  // is the party that started the market and whose deposit funds it. If
+  // somebody has to wait for a resume, it should be the asker. Moving this
+  // line earlier would silently reverse that.
   const allLines = [
     ...lines,
     {

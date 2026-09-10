@@ -1924,3 +1924,107 @@ pnpm check:graph --slices
 ```
 
 ADIM 4 (ENS spike) hâlâ açık.
+
+---
+
+## ADIM 16 SERTLEŞTİRME — Settlement'ın Yeniden Çalıştırılabilirliği
+
+- **Tarih:** 2026-09-10
+- **Durum:** GEÇTİ
+- **Test:** 36 yazıldı (26 settlement-resume + 10 hcs-message), 36 geçti
+- **Tam suite:** 588/588 yeşil (4.07 sn), `pnpm -r build` temiz
+- **Neden bu iş:** ADIM 16'nın "Kalan risk" bölümündeki iki madde. Yeni adım
+  değil, açık kalmış bir defekt.
+
+### Kapatılan defekt
+
+ADIM 16'nın kendi kaydı:
+
+> settlement kısmi bir başarısızlıktan sonra tekrar çalıştırılırsa ödenmiş
+> parçalar yeniden ödenir
+
+Ciddi olan buydu. Çökme değil, **hazineden ikinci kez para çıkması** — ve
+hiçbir şey fark etmezdi, çünkü `core`'daki bütün muhasebe değişmezleri neyin
+ödenmesi *gerektiğini* tarif ediyor, neyin ödendiğini değil.
+
+### Üç kural
+
+**1. Plan bir kez hesaplanıyor ve saklanıyor.** Devam eden bir settlement
+yeniden hesaplamıyor. Aksi halde "zaten ödendi" artık var olmayan bir plan
+hakkında bir iddia olurdu. `StoredMarket.settlementProgress` bunun için var ve
+oradaki tek mutable alan.
+
+**2. Onaylanmayan parça `unknown`, `failed` değil.** Transfer hata fırlattığında
+işlemin zincire yazılıp yazılmadığını **bilmiyoruz**. "Yazılmadı" varsaymak tam
+olarak iki kez ödeten varsayım. Böyle bir parça settlement'ı durduruyor ve
+hazinenin işlem geçmişine bakmış bir insanın kararını bekliyor:
+
+```
+resolveSettlementChunk(marketId, index, 'paid' | 'not-paid', evidence)
+```
+
+Kanıt zorunlu ve açıkladığı ödemenin yanına, kamuya açık kayda yazılıyor.
+Otomatik karar veren bir sürümü mümkün (mirror node sorgusu) ama `paid`
+yönünde yanlış cevap agent'ı sessizce eksik ödüyor, `not-paid` yönünde iki kez
+ödüyor. İkisi de çıkarımdan verilecek karar değil.
+
+**3. İlerleme HCS'e yazılıyor.** Yeni mesaj tipi: `settlement-chunk`. Bellek
+restart'ı atlatmıyor ve restart, tekrar çalıştırmanın en muhtemel olduğu an.
+Topic atlatıyor, consensus ile sıralı ve herkes HashScan'e karşı
+doğrulayabiliyor.
+
+### Yazma sırası, ve neden
+
+Parça makbuzunu yazamamak **para hareketini geri almamalı**. `writeChunkOutcome`
+hata fırlatmıyor: fırlatsaydı parçanın ödendiğini söyleyen bellek durumu
+kaybolur ve sonraki devam onu tekrar öderdi. Makbuz kaybı denetlenebilirliğe
+mal oluyor — ikisinin ucuz olanı bu. Kayıp bir olay olarak raporlanıyor
+(`settlement-chunk-unrecorded`), sessizce yutulmuyor.
+
+### Zaten settled olan markete settle() çağırmak
+
+Artık hata değil, kayıt döndüren bir no-op. Yanıtı kaybolmuş bir çağıran
+"borç yok" öğrenmeli, yeni bir denemeye davet eden bir hata değil.
+
+### Parça atomikliği — düzeltilmedi, düzeltilemez
+
+ADIM 16'nın diğer maddesi. Hedera tek bir transferin dokunabileceği hesap
+sayısını sınırlıyor (9 alacak + 1 borç), 20 agent + asker sığmıyor. Birden
+fazla işlemi birbirine göre atomik yapmak protokol seviyesinde mümkün değil.
+
+Değişen şey, atomik olmamanın **tehlikeli** olan sonucuydu: yarıda kalan bir
+settlement artık nerede kaldığını söylüyor, güvenle devam ettirilebiliyor ve
+kayıtta duruyor. Sessiz bir tehlike, görünür ve kurtarılabilir bir duruma
+dönüştü.
+
+Bir de sıralama: **asker satırı planın en sonunda.** Kısmi başarısızlıkta
+ödenmemiş kuyrukta kalan kişi bu. Agent'ların teminatı ödenene kadar kilitli,
+asker ise marketi başlatan ve fonlayan taraf; bekleyecek olan asker olmalı. Bu
+zaten böyleydi ama kasıt mı tesadüf mü belli değildi — artık yorumda ve testte.
+
+### Kanıt
+
+```
+apps/api/test/settlement-resume.test.ts (26 tests)
+
+  ✓ THE DEFECT: re-running a partial settlement
+      ✓ DOES NOT PAY A CHUNK THAT ALREADY WENT THROUGH
+      ✓ throws the same blocked error rather than pretending to make progress
+      ✓ reuses the stored plan instead of recomputing it
+      ✓ writes the settlement message only once
+  ✓ resolving an unknown chunk (7 tests)
+  ✓ when the ledger cannot record a chunk (2 tests)
+  ✓ who waits when a settlement stops partway (2 tests)
+```
+
+Yük taşıyan test birincisi. Eski kodda kırmızı olurdu: `settle()` planı baştan
+hesaplayıp 0. parçayı ikinci kez gönderirdi.
+
+### Kalan iş
+
+ADIM 17'nin entegrasyon testi bu yolu zincirde denemiyor — orada payer gerçek
+ve kasten patlatmak zor. `unknown` yolunun canlı doğrulaması ADIM 31'de
+(demo senaryoları) yapılabilir, ya da hiç yapılmaz ve birim testleri yeterli
+sayılır. Bu bir karar, eksik değil.
+
+ADIM 4 (ENS spike) hâlâ açık.

@@ -60,6 +60,7 @@ export {
   type MarketCloseMessage,
   type MarketOpenMessage,
   type ReportMessage,
+  type SettlementChunkMessage,
   type SettlementMessage,
   type TimeoutMessage,
 } from './hcs-message.js';
