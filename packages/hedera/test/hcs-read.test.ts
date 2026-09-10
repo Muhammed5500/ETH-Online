@@ -146,3 +146,57 @@ describe('readTopicMessages', () => {
     await expect(readTopicMessages('testnet', '0.0.9999', { fetchImpl })).rejects.toThrow(/404/);
   });
 });
+
+describe('transient network failures', () => {
+  const noSleep = async (): Promise<void> => {};
+
+  it('retries a dropped connection — the read is idempotent, so a repeat is free', async () => {
+    // Seen for real in STEP 16: a bare `fetch failed` from a momentary hiccup
+    // killed a verification run that had nothing wrong with it.
+    let calls = 0;
+    const fetchImpl = vi.fn(async (input: string | URL | Request): Promise<Response> => {
+      void input;
+      if (++calls < 3) throw new Error('fetch failed');
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ messages: [mirrorEntry(1)], links: { next: null } }),
+        text: async () => '',
+      } as unknown as Response;
+    });
+
+    const entries = await readTopicMessages('testnet', '0.0.5555', { fetchImpl, sleep: noSleep });
+    expect(entries).toHaveLength(1);
+    expect(calls).toBe(3);
+  });
+
+  it('does NOT retry an HTTP status — 404 is an answer, not a glitch', async () => {
+    let calls = 0;
+    const fetchImpl = vi.fn(async (input: string | URL | Request): Promise<Response> => {
+      void input;
+      calls++;
+      return {
+        ok: false,
+        status: 404,
+        text: async () => 'Not found',
+        json: async () => ({}),
+      } as unknown as Response;
+    });
+
+    await expect(
+      readTopicMessages('testnet', '0.0.9999', { fetchImpl, sleep: noSleep }),
+    ).rejects.toThrow(/404/);
+    expect(calls).toBe(1);
+  });
+
+  it('gives up after the attempt budget', async () => {
+    const fetchImpl = vi.fn(async (input: string | URL | Request): Promise<Response> => {
+      void input;
+      throw new Error('fetch failed');
+    });
+    await expect(
+      readTopicMessages('testnet', '0.0.5555', { fetchImpl, attempts: 2, sleep: noSleep }),
+    ).rejects.toThrow(/fetch failed/);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+});

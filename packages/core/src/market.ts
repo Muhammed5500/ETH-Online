@@ -254,6 +254,22 @@ export class Market {
     if (last) this.state.referenceReport = last;
   }
 
+  /**
+   * Kapanmış marketi `settled` olarak işaretler.
+   *
+   * Durum geçişi burada, çünkü state machine bu sınıfın sorumluluğu.
+   * Orchestrator'ın `getState()` üzerinden `status` yazması, ödemeler
+   * dağıtılmadan da bir marketi settled gösterebilirdi.
+   */
+  markSettled(): void {
+    if (this.state.status !== 'closed') {
+      throw new Error(
+        `Sadece kapanmış market settled olabilir (şu an: ${this.state.status}).`,
+      );
+    }
+    this.state.status = 'settled';
+  }
+
   // ---------------------------------------------------------------- sorgular
 
   /** Marketin şu anki fiyatı: son rapor, yoksa prior. */

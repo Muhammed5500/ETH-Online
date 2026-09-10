@@ -1374,3 +1374,160 @@ gerekiyor (`pendingAgentId`). O sıralama ADIM 16'nın işi; endpoint hazır,
 sürücüsü yok.
 
 ADIM 4 (ENS spike) hâlâ açık.
+
+---
+
+## ADIM 16 — Orchestrator ve Ödeme Yürütücü
+
+- **Tarih:** 2026-09-10
+- **Durum:** GEÇTİ
+- **Test:** 36 yazıldı, 36 geçti (16 transfer planı + 20 orchestrator)
+- **Tam suite:** 380/380 yeşil, build temiz
+- **Kanıt:** `pnpm check:orchestrator` — testnet'te tam market, 15 kontrol PASS
+
+### Zincir üstü sonuç
+
+```
+Market:   mkt-2026-09-10-001  (topic 0.0.10457908)
+Bond:     20 agent × 1 HBAR, hepsi kendi hesabından x402 ile
+Raporlar: 5   (2 skorlu + 3 sabit ücret — k=3 ile birebir doğru)
+Plan:     2.099.314.719 tinybar giren = çıkan
+Hazine:   delta 0.00000000 HBAR
+Defter:   8 olay, consensus sırası bozulmadan
+```
+
+**Hazine deltasının tam sıfır olması bu adımın asıl sonucu.** Giren para
+(deposit + 20 bond) kuruşu kuruşuna çıktı. Muhasebe planda değil zincirde
+kapandı.
+
+### YUVARLAMA KURALI — paranın yaratıldığı veya yok olduğu yer
+
+`core` soyut birimlerle ve kayan noktayla settle ediyor, zincir tam tinybar
+taşıyor. İkisi arasındaki köprü paranın sessizce yaratılabildiği tek yer.
+
+**Kural: her agent AŞAĞI yuvarlanır, kalan tam olarak askere gider.**
+
+Agent'ı aşağı yuvarlamak en fazla bir tinybar'ın altında eksik ödeme yapar.
+Yukarı veya en yakına yuvarlamak, ödemelerin **hazinede olandan fazla**
+toplamasına yol açabilir — hazinede deposit + bond'lar var, bir kuruş fazlası
+yok. Asker kalanı tasarım gereği emiyor, şans eseri değil. Ve kimlik tam
+sayıda kapanıyor:
+
+```
+deposit + Σ bond  ==  Σ transfer
+```
+
+Tolerans değil, **tam eşitlik**. 100 rastgele markette ve yalancılı
+senaryolarda test ediliyor. Dengelemeyen bir plan hiç gönderilmiyor,
+`buildTransferPlan` hata fırlatıyor.
+
+Bu asimetri bir testte kendini gösterdi: `1.1 * 1e8 = 110000000.00000001`,
+yani fiyat helper'ı (yukarı) 110000001, ödeme (aşağı) 110000000 veriyor.
+Testte yanlışlıkla fiyat helper'ını beklenen değer olarak kullanmıştım.
+
+### Turdaki sıra — bu adımın kalbi
+
+```
+1. agent çek          SON mesajın running hash'ini kullanır
+2. rapor iste         HTTP, süre sınırıyla
+3. raporu HCS'e yaz   YENİ bir running hash üretir
+4. durma zarı at      o yeni hash'ten
+```
+
+4, 3'ten sonra gelmek zorunda. Zar, **az önce yazılan raporun** hash'inden
+gelmeli; o hash ağ consensus'a varana kadar var olmadığı için kimse —biz dahil—
+marketin nerede duracağını önceden bilemiyor.
+
+Test bunu doğrudan ölçüyor: turdan sonra `stop` çekilişinin kullandığı hash,
+tur başındaki hash'ten farklı ve mevcut hash'e eşit olmalı.
+
+### Timeout bir tur değildir
+
+Agent cevap vermezse bond slash, havuzdan düşer, **zar ATILMAZ**. Aksi halde
+sessiz kalarak marketi erken kapatmak mümkün olurdu ve bu herkesin çekebileceği
+bir kol demek.
+
+Ama zar atılmasa da HCS'e `timeout` mesajı yazılıyor ve rastgelelik kaynağı
+güncelleniyor: sonraki çekiliş taze entropi almalı.
+
+### Kullanılamaz cevap da timeout sayılıyor
+
+Bozuk imza veya `[0,1]` dışı olasılık, sessizlikle aynı şekilde slash ediliyor.
+Olmasaydı, pozisyonunu beğenmeyen bir agent kasten çöp gönderip skorlanmaktan
+kurtulur ve teminatını da korurdu — mekanizmadan bedava bir opsiyon.
+
+Testte tam bunu kuruyoruz: doğru agent id'siyle ama **başka agent'ın anahtarıyla**
+imzalanmış bir rapor gönderiliyor, sonuç `timed-out`.
+
+### BEŞİNCİ TUZAK — ardışık x402 ödemeleri
+
+20 agent sırayla bond yatırırken **9.'da 402 geldi.** Aynı agent tek başına
+denendiğinde sorunsuz ödedi (201 + settlement). Bakiyesi 10 HBAR'da kalmıştı,
+yani başarısız denemede para hiç hareket etmemişti.
+
+Yani hesap sorunu değil, hızlı ardışık ödemelerde geçici bir durum. 20 agent'ın
+sırayla bond yatırması marketin normal açılış şekli olduğu için bu script'e
+değil koda ait: `payWithRetry` eklendi.
+
+**Tekrar denemeyi güvenli yapan şey ne:** 402 genelde "ödeme settle olmadı"
+demek, ama "facilitator settle etti ve yanıt kayboldu" buradan aynı görünüyor
+ve onu tekrarlamak iki kez ödeme yapar. Bu yüzden tekrar kararı ödeme
+sonucuna değil **sunucu durumuna** bakıyor: bond zaten kayıtlıysa kayıp yanıt
+aslında settle olmuş demektir, tekrar gönderilmiyor.
+
+İkinci koşuda 20 bond'un hepsi geçti.
+
+### ALTINCI TUZAK — mirror node'da geçici fetch hatası
+
+Settlement bittikten sonra defteri geri okurken çıplak bir `fetch failed`
+koşuyu öldürdü. Mekanizmada hiçbir sorun yoktu.
+
+`readTopicMessages`'a tekrar deneme eklendi. Ödemede asla yapılamayacak bir şey
+burada güvenli: bu idempotent bir GET, tekrarı bedava ve hiçbir şeyi
+değiştirmiyor.
+
+**Ama HTTP durum kodu tekrarlanmıyor.** 404 bir cevaptır, arıza değil — topic
+gerçekten yok demek. Ağ hatası ile "böyle bir topic yok" aynı şekilde ele
+alınırsa doğrulayan kişi yanlış sonuca varır. Testi var.
+
+### Üç enjeksiyon noktası
+
+`Ledger` (ADIM 15'ten), `AgentTransport` ve `Payer`. Üçü de sahtelenebiliyor,
+dolayısıyla tur döngüsünün ve settlement muhasebesinin tamamı ağa çıkmadan
+test ediliyor — 20 orchestrator testi, hepsi saniyeler içinde.
+
+Bu olmasaydı "timeout zar atmıyor" gibi bir kuralı doğrulamak için her
+seferinde testnet'te bir agent'ı susturmak gerekirdi.
+
+### Settlement sırası: önce kayıt, sonra para
+
+HCS'e settlement mesajı transferlerden **önce** yazılıyor. Bir transfer
+başarısız olursa ne olması gerektiği zaten kamuya açık kayıtta duruyor ve
+gerçekte ne olduğuyla karşılaştırılabiliyor. Ters sıra, ne olması gerektiğini
+söyleyen hiçbir şey olmadan kısmi bir ödemeye izin verirdi.
+
+### Transferler neden birden fazla işlem
+
+Hedera tek bir transferin dokunabileceği hesap sayısını sınırlıyor; 20 agent +
+asker bir işleme sığmıyor. Plan 9'arlı parçalara bölünüyor, her parça tek bir
+atomik `TransferTransaction`.
+
+**Parçalar birbirine göre atomik değil.** Gerçek bir kısıt; step-log'a
+yazılıyor ve README'de belirtilecek. Koşuda 3 işlem çıktı, hepsi SUCCESS.
+
+### `core`'a küçük ekleme: `Market.markSettled()`
+
+Orchestrator `getState().status = 'settled'` yazmaya çalışıyordu, build
+reddetti (`Readonly<MarketState>`). Doğru olan da bu: durum geçişi state
+machine'in sorumluluğu. `markSettled()` sadece kapanmış marketi settled
+yapıyor, aksi halde hata fırlatıyor — ödemeler dağıtılmadan bir market settled
+görünemez.
+
+### Kalan risk
+
+Parça atomikliği yukarıda. Bir de: settlement başarısız bir parçadan sonra
+tekrar çalıştırılırsa ödenmiş parçalar yeniden ödenir. ADIM 17'de bu senaryo
+düşünülmeli — ya parça sonuçları kalıcı olarak kaydedilmeli ya da settlement
+idempotent hale getirilmeli.
+
+ADIM 4 (ENS spike) hâlâ açık.

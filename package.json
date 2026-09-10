@@ -19,14 +19,16 @@
     "check:hcs": "tsx scripts/check-hcs.ts",
     "check:randomness": "tsx scripts/check-randomness.ts",
     "api": "tsx apps/api/src/server.ts",
-    "check:api": "tsx scripts/check-api.ts"
+    "check:api": "tsx scripts/check-api.ts",
+    "check:orchestrator": "tsx scripts/check-orchestrator.ts"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
     "dotenv": "^17.4.2",
     "tsx": "^4.19.0",
     "typescript": "^5.9.0",
-    "vitest": "^3.2.0"
+    "vitest": "^3.2.0",
+    "@types/express": "^5.0.6"
   },
   "dependencies": {
     "@ethonline/core": "workspace:*",
@@ -35,6 +37,7 @@
     "@ethonline/env": "workspace:*",
     "@ethonline/api": "workspace:*",
     "@x402/fetch": "^2.25.0",
-    "@x402/hedera": "^2.25.0"
+    "@x402/hedera": "^2.25.0",
+    "express": "^5.2.1"
   }
 }

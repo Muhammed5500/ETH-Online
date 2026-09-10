@@ -155,3 +155,57 @@ export function hederaSpendControls(maxAmountPerPayment: bigint) {
  * exactly like a failed payment, while the payment has in fact gone through.
  */
 export const SETTLEMENT_HEADER = 'payment-response';
+
+export interface PayWithRetryOptions {
+  readonly attempts?: number;
+  readonly baseDelayMs?: number;
+  /**
+   * Asks the SERVER whether the request already took effect.
+   *
+   * This is what makes retrying safe. A 402 usually means the payment was
+   * never settled, but "the facilitator settled and the response was lost"
+   * looks identical from here — and retrying that would pay twice. So the
+   * decision to retry is based on server state, not on the payment result.
+   */
+  readonly alreadyDone?: () => Promise<boolean>;
+  readonly onRetry?: (attempt: number, delayMs: number, status: number) => void;
+  readonly sleep?: (ms: number) => Promise<void>;
+}
+
+/**
+ * Sends a paid request, retrying a 402 with backoff.
+ *
+ * WHY THIS EXISTS. Twenty agents bonding one after another is the normal shape
+ * of a market opening, and in practice a run of rapid payments does not all
+ * succeed first time: during STEP 16 the ninth bond in a row came back 402
+ * while the same agent paid fine on its own a moment later. Nothing was wrong
+ * with the account — the balance had not moved — so the payment simply had not
+ * been settled.
+ *
+ * Without a retry the demo is one transient facilitator hiccup away from a
+ * market that cannot reach its minimum pool.
+ */
+export async function payWithRetry(
+  doRequest: () => Promise<Response>,
+  opts: PayWithRetryOptions = {},
+): Promise<Response> {
+  const attempts = opts.attempts ?? 4;
+  const baseDelayMs = opts.baseDelayMs ?? 1500;
+  const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+
+  let last: Response | undefined;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    const res = await doRequest();
+    // Anything but "payment required" is a real answer, success or otherwise.
+    if (res.status !== 402) return res;
+    last = res;
+
+    if (opts.alreadyDone && (await opts.alreadyDone())) return res;
+    if (attempt === attempts) break;
+
+    const delay = baseDelayMs * 2 ** (attempt - 1);
+    opts.onRetry?.(attempt, delay, res.status);
+    await sleep(delay);
+  }
+  return last!;
+}

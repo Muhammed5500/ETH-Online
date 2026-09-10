@@ -99,6 +99,45 @@ export interface ReadTopicOptions {
   /** Hard stop, so a hostile or runaway topic cannot exhaust memory. */
   readonly maxMessages?: number;
   readonly fetchImpl?: typeof fetch;
+  /**
+   * Attempts per page, for transient network failures. Default 3.
+   *
+   * Safe to retry here in a way a payment never is: this is an idempotent GET
+   * against a public mirror, so a repeat costs nothing and changes nothing.
+   * A bare `fetch failed` from a momentary DNS or connection hiccup should not
+   * look the same as "this topic does not exist".
+   */
+  readonly attempts?: number;
+  readonly retryDelayMs?: number;
+  readonly sleep?: (ms: number) => Promise<void>;
+}
+
+async function fetchPage(
+  doFetch: typeof fetch,
+  url: string,
+  topicId: string,
+  attempts: number,
+  retryDelayMs: number,
+  sleep: (ms: number) => Promise<void>,
+): Promise<unknown> {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      const res = await doFetch(url);
+      if (!res.ok) {
+        // A status from the mirror node is an answer, not a glitch: 404 means
+        // the topic really is not there. Reported, never retried.
+        throw new Error(`Mirror node returned ${res.status} for topic ${topicId}: ${await res.text()}`);
+      }
+      return (await res.json()) as unknown;
+    } catch (e) {
+      lastError = e;
+      const isHttpAnswer = e instanceof Error && e.message.startsWith('Mirror node returned');
+      if (isHttpAnswer || attempt === attempts) throw e;
+      await sleep(retryDelayMs * attempt);
+    }
+  }
+  throw lastError;
 }
 
 /**
@@ -115,17 +154,16 @@ export async function readTopicMessages(
   const doFetch = opts.fetchImpl ?? fetch;
   const limit = opts.limit ?? 100;
   const maxMessages = opts.maxMessages ?? 10_000;
+  const attempts = opts.attempts ?? 3;
+  const retryDelayMs = opts.retryDelayMs ?? 1000;
+  const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   const base = mirrorNodeUrl(network);
 
   let next: string | null = `/api/v1/topics/${topicId}/messages?order=asc&limit=${limit}`;
   const out: TopicEntry[] = [];
 
   while (next && out.length < maxMessages) {
-    const res: Response = await doFetch(`${base}${next}`);
-    if (!res.ok) {
-      throw new Error(`Mirror node returned ${res.status} for topic ${topicId}: ${await res.text()}`);
-    }
-    const body: unknown = await res.json();
+    const body = await fetchPage(doFetch, `${base}${next}`, topicId, attempts, retryDelayMs, sleep);
     out.push(...parseMirrorMessages(body));
 
     const links = (body as { links?: { next?: unknown } }).links;

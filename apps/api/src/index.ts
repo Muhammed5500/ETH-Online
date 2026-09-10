@@ -47,6 +47,31 @@ export {
   createPaymentGate,
   hederaSpendControls,
   marketIdFromPath,
+  payWithRetry,
   SETTLEMENT_HEADER,
   type PaymentGateOptions,
+  type PayWithRetryOptions,
 } from './payment.js';
+
+export {
+  Orchestrator,
+  type AgentReportResponse,
+  type AgentTransport,
+  type OrchestratorDeps,
+  type Payer,
+  type PayerReceipt,
+  type ReportRequest,
+  type RoundResult,
+  type SettlementResult,
+} from './orchestrator.js';
+
+export {
+  assertPlanBalances,
+  buildTransferPlan,
+  chunkPlan,
+  type PlanInput,
+  type TransferLine,
+  type TransferPlan,
+} from './settlement-plan.js';
+
+export { hederaPayer, httpAgentTransport, type HederaPayerOptions } from './transport.js';

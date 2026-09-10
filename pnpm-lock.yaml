@@ -29,7 +29,13 @@ importers:
       '@x402/hedera':
         specifier: ^2.25.0
         version: 2.25.0(ansi-regex@6.2.2)(ansi-styles@6.2.3)(bn.js@5.2.5)(debug@4.4.3)(protobufjs@8.2.0)(react-native@0.87.1(@babel/core@7.29.7)(react@19.2.8))(strip-ansi@7.1.2)
+      express:
+        specifier: ^5.2.1
+        version: 5.2.1
     devDependencies:
+      '@types/express':
+        specifier: ^5.0.6
+        version: 5.0.6
       '@types/node':
         specifier: ^24.0.0
         version: 24.13.3
