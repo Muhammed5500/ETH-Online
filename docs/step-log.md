@@ -2028,3 +2028,145 @@ ve kasten patlatmak zor. `unknown` yolunun canlı doğrulaması ADIM 31'de
 sayılır. Bu bir karar, eksik değil.
 
 ADIM 4 (ENS spike) hâlâ açık.
+
+---
+
+## ADIM 27 — Market Listesi ve Soru Sorma
+
+- **Tarih:** 2026-09-10
+- **Durum:** KISMEN GEÇTİ — sayfalar ve deposit hesabı bitti, **cüzdan + x402
+  ödemesi yapılmadı.** Ayrıntı aşağıda.
+- **Test:** 15 yazıldı, 15 geçti
+- **Tam suite:** 603/603 yeşil, `pnpm -r build` temiz
+
+### ROADMAP'ten sapma: Next.js yerine Vite
+
+ROADMAP "Next.js App Router, Tailwind" diyor. Vite + React + Tailwind yapıldı.
+Gerekçe, önem sırasıyla:
+
+1. **Tek servis, tek origin.** Build `dist/`'e çıkıyor ve mevcut Express API
+   onu statik servis ediyor. Frontend ile ödemeli API aynı origin'de: CORS yok,
+   ikinci deployment yok, x402 akışı yüklendiği host'la konuşuyor.
+2. **Hiçbir sayfa sunucu istemiyor.** Dört sayfa, hepsi REST okuyup polling
+   yapıyor. SSR yok, SEO yok.
+3. **Repo'da hiçbir yerde build adımı yok.** Her paket tsx ile kaynaktan
+   koşuyor, `build` = `tsc --noEmit`. Statik bir bundle buna uyuyor, ikinci bir
+   Node runtime uymuyor.
+
+### Yol çakışması ve verilen karar
+
+`/market/:id` ve `/agents` hem API route'u hem doğal sayfa adı. Production'da
+aynı Express uygulaması ikisini de servis ettiği için sayfa, API tarafından
+gölgelenirdi.
+
+Temiz çözüm API'yi `/api` altına almaktı ve **reddedildi**: o yollar x402 ödeme
+kapısının konfigüre edildiği ve ADIM 17'nin testnet'te uçtan uca doğruladığı
+yollar. URL'ler güzelleşsin diye ödeme rayını yeniden doğrulamak, bu sistemde
+en az kurcalanası yer.
+
+Sayfalar taşındı, API yerinde kaldı: `/` liste, `/new` soru, `/m/:id` market,
+`/directory` agent dizini.
+
+### Demo sunucusu (`pnpm demo`)
+
+Frontend'i testnet'e karşı geliştirmek her reload'da zincir zamanı demek ve
+facilitator hıçkırığı frontend hatası gibi görünüyor. `scripts/demo-server.ts`
+**aynı app nesnesini** birim testlerin kullandığı bellek-içi ledger üzerinde
+koşturuyor ve her durumda market tohumluyor.
+
+Gerçek olan: mekanizma. `core` değiştirilmeden koşuyor, agent'lar running
+hash'ten çekiliyor, durma zarı o hash'lerden geliyor, settlement aynı
+aritmetikten ve aynı değişmez kontrollerinden geçiyor. Sahte olan: ledger (Map),
+payer (transferi kaydediyor, göndermiyor) ve agent inançları (senaryolu persona).
+
+**Bellek-içi ledger `src/memory-ledger.ts`'e taşındı.** Testlerdeki kopya
+silindi ve `test/helpers.ts` artık onu sarmalıyor. Ayrı bir kopya, demo'nun
+kullandığı ledger'dan ayrışırdı ve testler kimsenin koşmadığı bir ledger
+hakkında kanıt olurdu.
+
+"Running" market tek denemede tutmuyor: durma zarı gerçek, market ilk raporunda
+kapanabiliyor. Zorlamak yerine zar bir tanesini açık bırakana kadar market
+açılıyor (bu koşuda 3 deneme). Erken kapanan marketler listede dürüstçe kapalı
+olarak duruyor.
+
+### Express 5 tuzağı
+
+SPA fallback'i `app.get(/regex/)` ile yazmak **sunucuyu asıyor** — hata değil,
+sessiz kilitlenme. Express 5 route'ları path-to-regexp v8'den geçiyor. Regex
+route bırakıldı, yerine hangi yolun API'ye ait olduğuna JavaScript'te karar
+veren düz bir middleware kondu. Üç satır ve bir sürüm yükseltmesi bozamaz.
+
+### YANLIŞ YAZDIM, TEST YAKALADI
+
+Ask sayfasına şunu yazmıştım: *"a confident prior is a cheaper market to
+subsidise."* **Tam tersi.**
+
+Sınır `b · max_i(−log q⁰_i)`, yani referans agent'ın nereye düşeceği üzerinden
+**en kötü durum** — paper'ın `b·H(r, q⁰)` yazdığı ifade `r`'yi gerektiriyor ve
+market açılırken `r` bilinmiyor. Prior %5'e çekilirse bir bileşen sıfıra
+yaklaşıyor, `−log(küçük)` büyüyor: referans %95'e düşerse skorlama kuralı o
+hareketin tamamını ödemek zorunda. Uniform prior en ucuz yer.
+
+Ekrandaki **rakam zaten doğruydu** (core'dan geliyordu), yanlış olan metindi —
+"formülü kopyalama" kararının somut faydası bu. Slider'ı oynatan biri deposit'in
+arttığını görecek, metin ise azaldığını söyleyecekti.
+
+Test, yorumlar ve arayüz metni düzeltildi. Ayrıca 50/50'nin altı farklı prior'a
+karşı en ucuz olduğunu doğrulayan bir test eklendi.
+
+### Deposit'in API ile aynı olduğu test ediliyor
+
+ADIM 27'nin asıl kabul kriteri "deposit hesabı doğru". Frontend `requiredDeposit`
+fonksiyonunu **doğrudan** `@ethonline/core`'dan çağırıyor — `core` saf TypeScript
+olduğu için tarayıcıda değişmeden koşuyor. Test bunu API'nin `depositTinybar`
+çıktısıyla tinybar hassasiyetinde karşılaştırıyor, üç parametre seti ve dört
+prior için. Sabite karşı değil birbirine karşı: sabit, ikisi birlikte kayarken
+de geçerdi.
+
+### Kabul kriterleri
+
+| Kriter | Durum |
+|---|---|
+| Liste gerçek API'den besleniyor | EVET |
+| Deposit hesabı doğru ve canlı güncelleniyor | EVET, API ile eşliği test ediliyor |
+| Soru sorup ödeme yapılabiliyor | **HAYIR** — aşağı bakınız |
+
+### Yapılmayan: cüzdan bağlantısı ve x402 ödemesi
+
+Form çalışıyor, doğrulama `core`'un kendi `validateParams`'ı, POST atılıyor.
+Ödeme kapısı olmayan demo sunucusuna karşı market gerçekten açılıyor. Gerçek
+sunucuya karşı 402 dönüyor ve arayüz bunu "tarayıcı cüzdanı henüz bağlı değil"
+diye açıkça söylüyor — 503'ten ayrı, çünkü ikisi zıt tepki gerektiriyor.
+
+Tarayıcıda Hedera x402 imzalamak ayrı bir iş: `@x402/hedera` Node paketi,
+tarayıcı desteği doğrulanmadı, ve cüzdan (HashPack vb.) entegrasyonu gerekiyor.
+Kendi adımı olarak ele alınmalı; ADIM 27'nin geri kalanını buna bağlayıp
+bekletmek anlamsızdı.
+
+### Görsel doğrulama yapılmadı
+
+Chrome eklentisi bu oturumda bağlı değildi, ekran görüntüsü alınamadı. HTTP
+seviyesinde doğrulandı: dört sayfa da 200 dönüyor, SPA fallback çalışıyor, API
+route'ları gölgelenmiyor. **Ekranların gerçekten doğru göründüğü henüz kimse
+tarafından görülmedi** — `pnpm demo` çalıştırılıp göze bakılması gerekiyor.
+
+### Kanıt
+
+```
+pnpm --filter @ethonline/web build
+  dist/index.html                   0.41 kB
+  dist/assets/index-DMEtul7s.css   20.69 kB   gzip: 4.88 kB
+  dist/assets/index-DyqQom4Q.js   281.29 kB   gzip: 89.33 kB
+
+pnpm demo
+  bonding    mkt-2026-09-10-001
+  running    mkt-2026-09-10-004  (4 reports, 3 attempt(s))
+  settled    mkt-2026-09-10-005
+  settled    mkt-2026-09-10-006  (one agent reports the opposite on purpose)
+
+  /            200      /m/x         200
+  /new         200      /directory   200
+  GET /markets -> 6 markets
+```
+
+ADIM 4 (ENS spike) hâlâ açık.

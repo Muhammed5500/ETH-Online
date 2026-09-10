@@ -21,7 +21,8 @@
     "api": "tsx apps/api/src/server.ts",
     "check:api": "tsx scripts/check-api.ts",
     "check:orchestrator": "tsx scripts/check-orchestrator.ts",
-    "check:graph": "tsx scripts/check-graph.ts"
+    "check:graph": "tsx scripts/check-graph.ts",
+    "demo": "tsx scripts/demo-server.ts"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

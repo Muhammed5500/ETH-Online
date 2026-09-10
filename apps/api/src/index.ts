@@ -17,6 +17,13 @@ export {
 export { hederaLedger, type Ledger, type LedgerAppend } from './ledger.js';
 
 export {
+  createMemoryLedger,
+  memoryRunningHash,
+  type MemoryLedger,
+  type MemoryLedgerOptions,
+} from './memory-ledger.js';
+
+export {
   bondTinybar,
   DEFAULT_HBAR_PER_UNIT,
   DEFAULT_RESOLVE_PRICE_TINYBAR,

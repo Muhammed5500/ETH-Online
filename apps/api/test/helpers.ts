@@ -1,86 +1,60 @@
 /**
  * Test doubles for the API.
  *
- * The fake ledger is what makes every route testable offline. It returns
- * deterministic 48-byte running hashes, so a market opened in a test behaves
- * exactly like one opened against HCS: the draws and the stopping rolls come
- * out of hashes, not out of `Math.random`.
+ * The ledger itself is NOT a double any more — it is `createMemoryLedger` from
+ * `src/memory-ledger.ts`, the same in-memory implementation the demo server
+ * and the scripted scenarios run against. What lives here is only the extra
+ * the tests need on top of it: the ability to make a write fail on demand, so
+ * the chain-is-down paths are covered.
+ *
+ * Sharing the implementation is the point. A separate fake would drift from
+ * the one the demo uses, and the tests would then be evidence about a ledger
+ * nobody runs.
  */
 import { PrivateKey } from '@hashgraph/sdk';
 import type { HcsMessage } from '@ethonline/hedera';
-import type { Ledger, LedgerAppend } from '../src/ledger.js';
+import { createMemoryLedger, type MemoryLedger } from '../src/memory-ledger.js';
+import type { LedgerAppend } from '../src/ledger.js';
 import { canonicalReportMessage, type ReportClaim } from '../src/signatures.js';
 
-export interface FakeLedger extends Ledger {
-  readonly topics: Map<string, HcsMessage[]>;
+export interface FakeLedger extends MemoryLedger {
   /** Makes the next write fail, to cover the chain-is-down path. */
   failNextAppend(message?: string): void;
   failNextCreate(message?: string): void;
 }
 
-/**
- * Deterministic stand-in for an HCS running hash.
- *
- * Real running hashes chain over the previous one; this mimics that by mixing
- * the topic and sequence number, so consecutive writes give different hashes
- * and a market actually progresses.
- */
-function fakeRunningHash(topicId: string, sequence: number): Uint8Array {
-  // All arithmetic stays in 32-bit space via Math.imul. Written first with
-  // plain `*`, which overflowed past 2^53, zeroed the low bits and made every
-  // sequence number collapse to the SAME hash — a fake that quietly broke the
-  // one property it exists to provide.
-  const out = new Uint8Array(48);
-  let seed = Math.imul(sequence, 2654435761) | 0;
-  for (let i = 0; i < topicId.length; i++) {
-    seed = Math.imul(seed ^ topicId.charCodeAt(i), 16777619) | 0;
-  }
-  for (let i = 0; i < out.length; i++) {
-    seed = (Math.imul(seed, 1103515245) + 12345) | 0;
-    out[i] = (seed >>> 16) & 0xff;
-  }
-  return out;
-}
-
 export function createFakeLedger(): FakeLedger {
-  const topics = new Map<string, HcsMessage[]>();
-  let created = 0;
+  const inner = createMemoryLedger();
   let appendFailure: string | undefined;
   let createFailure: string | undefined;
 
   return {
-    topics,
+    topics: inner.topics,
+    all: inner.all,
+
     failNextAppend(message = 'ledger unavailable') {
       appendFailure = message;
     },
     failNextCreate(message = 'topic creation failed') {
       createFailure = message;
     },
-    async createTopic(): Promise<string> {
+
+    async createTopic(memo: string): Promise<string> {
       if (createFailure) {
         const m = createFailure;
         createFailure = undefined;
         throw new Error(m);
       }
-      const topicId = `0.0.${900000 + ++created}`;
-      topics.set(topicId, []);
-      return topicId;
+      return inner.createTopic(memo);
     },
+
     async append(topicId: string, message: HcsMessage): Promise<LedgerAppend> {
       if (appendFailure) {
         const m = appendFailure;
         appendFailure = undefined;
         throw new Error(m);
       }
-      const list = topics.get(topicId) ?? [];
-      list.push(message);
-      topics.set(topicId, list);
-      const sequenceNumber = list.length;
-      return {
-        sequenceNumber,
-        consensusTimestamp: `178900${String(sequenceNumber).padStart(4, '0')}.000000001`,
-        runningHash: fakeRunningHash(topicId, sequenceNumber),
-      };
+      return inner.append(topicId, message);
     },
   };
 }
