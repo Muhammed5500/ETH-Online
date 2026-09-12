@@ -161,6 +161,18 @@ export interface SettlementView {
   };
 }
 
+/** What an agent has done, counted from the markets rather than claimed. */
+export interface AgentRecord {
+  readonly bonded: number;
+  readonly reported: number;
+  readonly reference: number;
+  readonly timedOut: number;
+  readonly flatFee: number;
+  /** Mechanism units, summed over settled markets. May be negative. */
+  readonly net: number;
+  readonly settledMarkets: number;
+}
+
 export interface AgentView {
   readonly agentId: string;
   readonly accountId: string;
@@ -169,12 +181,24 @@ export interface AgentView {
   readonly ensName?: string;
   readonly sliceIds?: readonly string[];
   readonly registeredAt: number;
+  /** Absent on an older server; the directory renders identity alone then. */
+  readonly record?: AgentRecord;
 }
 
 export interface OpenMarketRequest {
   readonly question: string;
   readonly params?: Partial<MarketParams>;
   readonly prior?: number;
+  /**
+   * Where the unspent deposit comes back to.
+   *
+   * The server cannot work this out for itself: the x402 gate settles after
+   * the handler has run, so the payer's account is not visible at the moment
+   * the market is created. The page knows it — it is the connected wallet —
+   * so it says so. Nothing is lost by a caller that omits it except its own
+   * refund, which the server then refuses to send anywhere.
+   */
+  readonly askerAccountId?: string;
 }
 
 export interface OpenMarketResponse {
@@ -213,10 +237,24 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+/**
+ * The `fetch` a request goes through.
+ *
+ * Injectable for exactly one reason: paying. A wallet-backed x402 client is a
+ * wrapped `fetch` that answers a 402 by signing and retrying, so the only way
+ * to pay for a route is to hand that wrapper to the call. Reads stay on the
+ * plain global.
+ */
+export type FetchLike = typeof fetch;
+
+async function request<T>(
+  path: string,
+  init?: RequestInit,
+  fetchImpl: FetchLike = fetch,
+): Promise<T> {
   let res: Response;
   try {
-    res = await fetch(`${API_BASE}${path}`, {
+    res = await fetchImpl(`${API_BASE}${path}`, {
       ...init,
       headers: { 'content-type': 'application/json', ...init?.headers },
     });
@@ -250,8 +288,18 @@ export const api = {
   agents: () => request<{ agents: AgentView[]; count: number }>('/agents'),
   health: () => request<{ ok: boolean; network: string; markets: number; agents: number }>('/health'),
 
-  openMarket: (body: OpenMarketRequest) =>
-    request<OpenMarketResponse>('/market', { method: 'POST', body: JSON.stringify(body) }),
+  /**
+   * The one paid call in this client.
+   *
+   * Pass the wallet's paying fetch to settle the 402; omit it and the request
+   * goes unpaid, which the demo server accepts and the real one refuses.
+   */
+  openMarket: (body: OpenMarketRequest, fetchImpl?: FetchLike) =>
+    request<OpenMarketResponse>(
+      '/market',
+      { method: 'POST', body: JSON.stringify(body) },
+      fetchImpl,
+    ),
 };
 
 /** HashScan link for a topic, transaction or account. */

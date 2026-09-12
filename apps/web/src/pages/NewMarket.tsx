@@ -34,6 +34,7 @@ import {
   type MarketParams,
 } from '@ethonline/core';
 import { ApiError, api } from '../lib/api.ts';
+import { useWallet } from '../lib/useWallet.tsx';
 import { depositBreakdown, expectedLength, formatHbar, percent, poolExhaustionRisk } from '../lib/format.ts';
 import { ErrorBox, Field, Panel } from '../components/ui.tsx';
 
@@ -82,6 +83,7 @@ function NumberField({
 
 export function NewMarket(): ReactNode {
   const navigate = useNavigate();
+  const wallet = useWallet();
   const [question, setQuestion] = useState('');
   const [priorPercent, setPriorPercent] = useState(50);
   const [params, setParams] = useState<MarketParams>(DEFAULT_PARAMS);
@@ -106,11 +108,22 @@ export function NewMarket(): ReactNode {
     setSubmitting(true);
     setError(undefined);
     try {
-      const res = await api.openMarket({
-        question: question.trim(),
-        params,
-        prior: priorPercent / 100,
-      });
+      // With a wallet connected this fetch answers the 402 by asking the
+      // wallet to sign the transfer and retrying. Without one the request
+      // goes unpaid and comes back 402, which the error below explains. Both
+      // servers behave that way now: the demo runs the same gate unless it is
+      // started with `--free` or has no treasury configured.
+      const res = await api.openMarket(
+        {
+          question: question.trim(),
+          params,
+          prior: priorPercent / 100,
+          // The refund address. Whatever the market does not spend comes back
+          // here, so it is the connected wallet or nothing.
+          ...(wallet.accountId ? { askerAccountId: wallet.accountId } : {}),
+        },
+        wallet.payingFetch,
+      );
       navigate(`/m/${res.marketId}`);
     } catch (e) {
       setError(e as ApiError);
@@ -334,8 +347,15 @@ export function NewMarket(): ReactNode {
           }
           detail={
             error.isPaymentRequired
-              ? 'The API answered 402. Browser wallet payment is not wired up yet — see the ' +
-                'step log. Against the demo server this route is open and costs nothing.'
+              ? wallet.status === 'connected'
+                ? `The wallet at ${wallet.accountId} was asked to pay and the API still answered ` +
+                  '402. Either the signature was rejected in the wallet, or the account is short ' +
+                  'of the deposit above.'
+                : wallet.status === 'unconfigured'
+                  ? 'Opening a market costs the deposit above, paid over x402. The wallet button ' +
+                    'is disabled because VITE_WALLETCONNECT_PROJECT_ID is not set.'
+                  : 'Opening a market costs the deposit above, paid over x402. Connect a wallet ' +
+                    'and try again.'
               : error.isUpstreamDown
                 ? 'This is not a problem with your question. The x402 facilitator is not ' +
                   'answering; existing markets stay readable. Try again shortly.'
@@ -349,7 +369,9 @@ export function NewMarket(): ReactNode {
         <p className="text-[11px] text-slate-600">
           {question.trim().length < 10
             ? 'Write a question of at least ten characters.'
-            : 'Opening a market writes it to a fresh HCS topic.'}
+            : wallet.status === 'connected'
+              ? `Paid from ${wallet.accountId}, then written to a fresh HCS topic.`
+              : 'The deposit is paid over x402 when you press this. Connect a wallet first, or the API answers 402.'}
         </p>
         <button
           onClick={() => void submit()}

@@ -18,7 +18,53 @@ import { Link, Route, Routes } from 'react-router-dom';
 import { MarketList } from './pages/MarketList.tsx';
 import { NewMarket } from './pages/NewMarket.tsx';
 import { Market } from './pages/Market.tsx';
+import { Directory } from './pages/Directory.tsx';
 import { NavLinkish } from './components/ui.tsx';
+import { useWallet } from './lib/useWallet.tsx';
+
+/**
+ * Connect a wallet, and show which account is paying.
+ *
+ * Opening a market costs a deposit, and the deposit is paid over x402 by the
+ * account connected here. Nothing else on the site needs a wallet: reading is
+ * free, and the payment stack is only fetched when this button is pressed.
+ */
+function WalletButton(): ReactNode {
+  const wallet = useWallet();
+
+  if (wallet.status === 'unconfigured') {
+    return (
+      <span
+        title="Set VITE_WALLETCONNECT_PROJECT_ID in .env — pairing goes through WalletConnect's relay, which needs a project id."
+        className="rounded px-2.5 py-1.5 text-sm text-slate-600"
+      >
+        Wallet unconfigured
+      </span>
+    );
+  }
+
+  if (wallet.status === 'connected') {
+    return (
+      <button
+        onClick={() => void wallet.disconnect()}
+        title="Disconnect"
+        className="rounded border border-[var(--color-edge)] px-2.5 py-1.5 font-mono text-xs text-slate-300 transition hover:border-slate-600 hover:text-slate-100"
+      >
+        {wallet.accountId}
+      </button>
+    );
+  }
+
+  return (
+    <button
+      onClick={() => void wallet.connect()}
+      disabled={wallet.status === 'connecting'}
+      className="rounded bg-slate-100 px-2.5 py-1.5 text-sm font-medium text-slate-900 transition hover:bg-white disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-500"
+    >
+      {wallet.status === 'connecting' ? 'Connecting…' : 'Connect wallet'}
+    </button>
+  );
+}
 
 function NotFound(): ReactNode {
   return (
@@ -27,15 +73,6 @@ function NotFound(): ReactNode {
       <Link to="/" className="mt-3 inline-block text-sm text-slate-200 underline">
         Back to the markets
       </Link>
-    </div>
-  );
-}
-
-function Placeholder({ step, title }: { step: string; title: string }): ReactNode {
-  return (
-    <div className="rounded-lg border border-dashed border-[var(--color-edge)] p-10 text-center">
-      <p className="text-sm text-slate-300">{title}</p>
-      <p className="mt-1 text-xs text-slate-500">Built in {step}.</p>
     </div>
   );
 }
@@ -57,6 +94,9 @@ export function App(): ReactNode {
             <NavLinkish to="/">Markets</NavLinkish>
             <NavLinkish to="/directory">Agents</NavLinkish>
             <NavLinkish to="/new">Ask</NavLinkish>
+            <span className="ml-2">
+              <WalletButton />
+            </span>
           </nav>
         </div>
       </header>
@@ -66,10 +106,7 @@ export function App(): ReactNode {
           <Route path="/" element={<MarketList />} />
           <Route path="/new" element={<NewMarket />} />
           <Route path="/m/:id" element={<Market />} />
-          <Route
-            path="/directory"
-            element={<Placeholder step="STEP 29" title="Agent directory" />}
-          />
+          <Route path="/directory" element={<Directory />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </main>
