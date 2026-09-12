@@ -22,25 +22,29 @@
     "check:api": "tsx scripts/check-api.ts",
     "check:orchestrator": "tsx scripts/check-orchestrator.ts",
     "check:graph": "tsx scripts/check-graph.ts",
-    "demo": "tsx scripts/demo-server.ts"
+    "demo": "tsx scripts/demo-server.ts",
+    "agents": "tsx scripts/agent-fleet.ts",
+    "check:resolve": "tsx scripts/check-resolve.ts",
+    "scenarios": "tsx scripts/demo-scenarios.ts"
   },
   "devDependencies": {
+    "@types/express": "^5.0.6",
     "@types/node": "^24.0.0",
     "dotenv": "^17.4.2",
     "tsx": "^4.19.0",
     "typescript": "^5.9.0",
-    "vitest": "^3.2.0",
-    "@types/express": "^5.0.6"
+    "vitest": "^3.2.0"
   },
   "dependencies": {
-    "@ethonline/core": "workspace:*",
-    "@hashgraph/sdk": "^2.81.0",
-    "@ethonline/hedera": "workspace:*",
-    "@ethonline/env": "workspace:*",
+    "@ethonline/agent": "workspace:*",
     "@ethonline/api": "workspace:*",
+    "@ethonline/core": "workspace:*",
+    "@ethonline/env": "workspace:*",
+    "@ethonline/graph": "workspace:*",
+    "@ethonline/hedera": "workspace:*",
+    "@hashgraph/sdk": "^2.81.0",
     "@x402/fetch": "^2.25.0",
     "@x402/hedera": "^2.25.0",
-    "express": "^5.2.1",
-    "@ethonline/graph": "workspace:*"
+    "express": "^5.2.1"
   }
 }

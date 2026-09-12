@@ -8,6 +8,9 @@ importers:
 
   .:
     dependencies:
+      '@ethonline/agent':
+        specifier: workspace:*
+        version: link:apps/agent
       '@ethonline/api':
         specifier: workspace:*
         version: link:apps/api
@@ -57,12 +60,37 @@ importers:
 
   apps/agent:
     dependencies:
+      '@ethonline/api':
+        specifier: workspace:*
+        version: link:../api
       '@ethonline/core':
         specifier: workspace:*
         version: link:../../packages/core
       '@ethonline/graph':
         specifier: workspace:*
         version: link:../../packages/graph
+      '@ethonline/hedera':
+        specifier: workspace:*
+        version: link:../../packages/hedera
+      '@hashgraph/sdk':
+        specifier: ^2.81.0
+        version: 2.81.0(bn.js@5.2.5)(react-native@0.87.1(@babel/core@7.29.7)(@types/react@19.3.0)(react@19.3.0))
+      express:
+        specifier: ^5.2.1
+        version: 5.2.1
+      openai:
+        specifier: ^7.15.0
+        version: 7.15.0(ws@8.21.0)(zod@3.25.76)
+    devDependencies:
+      '@types/express':
+        specifier: ^5.0.6
+        version: 5.0.6
+      '@types/supertest':
+        specifier: ^6.0.3
+        version: 6.0.3
+      supertest:
+        specifier: ^7.2.2
+        version: 7.2.2
 
   apps/api:
     dependencies:
@@ -2350,6 +2378,30 @@ packages:
   open@7.4.2:
     resolution: {integrity: sha512-MVHddDVweXZF3awtlAS+6pgKLlm/JgxZ90+/NBurBoQctVOOB/zDdVjcyPzQ+0laDGbsWgrRkflI65sQeOgT9Q==}
     engines: {node: '>=8'}
+
+  openai@7.15.0:
+    resolution: {integrity: sha512-2DIwesnPSduw68MFx7nAdgvshrgvS8WOan5W8+tgUMlAy/tY+Q41g80Pa+w/v64rHA6rtn+dketa8QvMVxU96w==}
+    engines: {node: '>=22.0.0'}
+    peerDependencies:
+      '@aws-sdk/credential-provider-node': '>=3.972.0 <4'
+      '@smithy/hash-node': '>=4.3.0 <5'
+      '@smithy/signature-v4': '>=5.4.0 <6'
+      undici: '>=5 <9'
+      ws: ^8.21.0
+      zod: ^3.25 || ^4.0
+    peerDependenciesMeta:
+      '@aws-sdk/credential-provider-node':
+        optional: true
+      '@smithy/hash-node':
+        optional: true
+      '@smithy/signature-v4':
+        optional: true
+      undici:
+        optional: true
+      ws:
+        optional: true
+      zod:
+        optional: true
 
   ox@0.14.44:
     resolution: {integrity: sha512-O54qXXHEk4ySamMSyBpI0AeBegS5frxU6+LA6Jb9Sf6kMOxcTNaxYmwZfpOu22DIQsdKfgQxHq8EsAGaoBQScA==}
@@ -5228,6 +5280,11 @@ snapshots:
     dependencies:
       is-docker: 2.2.1
       is-wsl: 2.2.0
+
+  openai@7.15.0(ws@8.21.0)(zod@3.25.76):
+    optionalDependencies:
+      ws: 8.21.0
+      zod: 3.25.76
 
   ox@0.14.44(typescript@5.9.3)(zod@3.25.76):
     dependencies:

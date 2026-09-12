@@ -47,6 +47,12 @@ import { bondTinybar, depositTinybar, DEFAULT_HBAR_PER_UNIT, unitsToTinybar } fr
 import { summarize } from './settlement-progress.js';
 import { verifyReportSignature } from './signatures.js';
 import {
+  buildResolveAnswer,
+  findAnsweredMarket,
+  findPendingMarket,
+  questionKey,
+} from './resolve.js';
+import {
   AgentRegistry,
   MarketStore,
   nextMarketId,
@@ -716,11 +722,115 @@ export function createApp(deps: AppDeps): Api {
   // Paid, and the shell of it only. STEP 22 fills this in; it is the piece the
   // Hedera track asks for — a real x402-gated service with a platform that
   // consumes it.
-  app.post('/resolve', (_req, res) => {
-    res.status(501).json({
-      error: 'Not implemented yet',
-      detail: 'The resolution service is built in STEP 22.',
-    });
+  app.post('/resolve', (req, res) => {
+    void (async () => {
+      const body = asRecord(req.body);
+
+      let question: string;
+      try {
+        question = requireString(body['question'], 'question');
+      } catch (e) {
+        return fail(res, 400, 'Invalid resolution request', (e as Error).message);
+      }
+      if (questionKey(question).length < 8) {
+        return fail(
+          res,
+          400,
+          'Question is too short',
+          'A question the mechanism can price needs to say what it is asking about.',
+        );
+      }
+
+      // Already answered: hand it over, with the topic to check it against.
+      const answered = findAnsweredMarket(markets, question);
+      if (answered) {
+        return void res.json({
+          status: 'answered',
+          ...buildResolveAnswer(answered, { network: config.network, registry }),
+        });
+      }
+
+      // Already running: point at it rather than opening a second market for
+      // the same question. Two markets on one question split the agents and
+      // give two prices, which is the parallel-markets design the paper rules
+      // out (PLAN section 6.7).
+      const pending = findPendingMarket(markets, question);
+      if (pending) {
+        return void res.status(202).json({
+          status: 'pending',
+          marketId: pending.id,
+          marketStatus: pending.market.getState().status,
+          topicId: pending.topicId,
+          watch: `/market/${pending.id}`,
+          detail:
+            'A market for this question is already running. Poll this endpoint or the market ' +
+            'until it closes; the answer is the terminal report.',
+        });
+      }
+
+      // Nothing yet: open one. The request does NOT wait for it. A full market
+      // is twenty bonds and a sequence of consensus rounds — about a hundred
+      // seconds on testnet (STEP 17) — and no client waits that long. Selling
+      // a guess in the meantime would be selling an answer the mechanism never
+      // produced.
+      try {
+        const params = resolveParams(body['params'], config.defaultParams);
+        const prior = resolvePrior(body['prior']);
+        assertValidParams(params);
+
+        const id = nextMarketId(markets.size, new Date(now()));
+        const topicId = await deps.ledger.createTopic(`ethonline market ${id}`);
+        const openMessage: HcsMessage = {
+          v: 1,
+          type: 'market-open',
+          marketId: id,
+          ts: now(),
+          question,
+          prior,
+          params: {
+            k: params.k,
+            T: params.T,
+            alpha: params.alpha,
+            epsilon: params.epsilon,
+            b: params.b,
+            R: params.R,
+          },
+        };
+        const appended = await deps.ledger.append(topicId, openMessage);
+        const rng = new HcsRandomSource(appended.runningHash);
+        const market = Market.create({ id, question, params, prior }, rng);
+
+        const stored = markets.add({
+          id,
+          question,
+          topicId,
+          params,
+          prior,
+          market,
+          rng,
+          depositTinybar: depositTinybar(params, prior, config.hbarPerUnit),
+          bondTinybar: bondTinybar(params, config.hbarPerUnit),
+          createdAt: now(),
+          bondingClosesAt: now() + config.bondingWindowMs,
+          bonds: new Map(),
+          annotations: new Map(),
+        });
+
+        return void res.status(202).json({
+          status: 'opened',
+          marketId: stored.id,
+          marketStatus: 'bonding',
+          topicId,
+          bondingClosesAt: stored.bondingClosesAt,
+          watch: `/market/${stored.id}`,
+          detail:
+            'No market had answered this question, so one was opened. Agents are bonding now; ' +
+            'poll this endpoint until it answers.',
+        });
+      } catch (e) {
+        return fail(res, 502, 'Could not open a market for this question', (e as Error).message);
+      }
+    })();
   });
 
   // Last in the chain, so it sees everything the routes and the payment gate

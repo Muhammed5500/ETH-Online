@@ -104,3 +104,13 @@ export {
 } from './settlement-progress.js';
 
 export { hederaPayer, httpAgentTransport, type HederaPayerOptions } from './transport.js';
+
+export {
+  buildResolveAnswer,
+  findAnsweredMarket,
+  findPendingMarket,
+  questionKey,
+  type AgentBreakdownEntry,
+  type BuildAnswerOptions,
+  type ResolveAnswer,
+} from './resolve.js';

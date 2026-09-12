@@ -2388,3 +2388,459 @@ sekmesi altında.
 ADIM 29 (agent dizini) ENS'e bağlı olduğu için atlandı — ENS beklemede.
 
 ADIM 4 (ENS spike) hâlâ açık.
+
+---
+
+## ADIM 20 + 21 — Agent Runner ve 20 Agent Havuzu
+
+- **Tarih:** 2026-09-12
+- **Durum:** GEÇTİ (kod + test). Canlı LLM koşusu ADIM 22 ile birlikte yapılacak.
+- **Test:** 57 yazıldı, 57 geçti (14 llm + 17 runner + 14 pool + 12 server)
+
+### PLAN SAPMASI — model sağlayıcısı
+
+PLAN.md ve ROADMAP sabit bağlam bloğu `claude-sonnet-5` diyor. Anthropic
+anahtarı yoktu, OpenAI ile koşuluyor (`gpt-4o-mini`, `OPENAI_MODEL` ile
+değiştirilebilir). Mekanizma açısından fark yok: agent'tan istenen tek şey
+`{ probability, reasoning }` ve hangi modelin ürettiği ne skorlamaya ne
+settlement'a giriyor. Sağlayıcı tek arayüzün (`LlmClient`) arkasında, geri
+dönmek tek dosya.
+
+### Yazılanlar
+
+| Dosya | İş |
+|---|---|
+| `llm.ts` | `LlmClient` arayüzü, OpenAI json_schema structured output, `parseJudgement` |
+| `runner.ts` | Kanıt topla → prompt → model → davranış → ham olasılık |
+| `pool.ts` | 20 agent, her birine FARKLI dilim altkümesi + persona |
+| `server.ts` | `POST /report`, Hedera anahtarıyla imza, `GET /health` |
+
+### Structured output pazarlık konusu değil
+
+Model serbest metin dönerse olasılık ayrıştırma hatası agent çekildiği anda
+oluşur, bond gider ve marketten bir rapor eksilir. Şema pinlendi. `parseJudgement`
+iki gerçek vakayı REDDEDİYOR, sessizce çevirmiyor: `"0.7"` string'i ve 0-100
+ölçeği. İkincisi kritik — 72 gelip 0.99'a kırpılsaydı ekranda kanaat gibi
+görünürdü.
+
+### Dilim altkümeleri: Varsayım 4'ün havuzdaki karşılığı
+
+ROADMAP "her agent'a dilim ata" diyor. 5 dilim / 20 agent'ta naif çözüm dilim
+başına 4 agent olurdu — ki bu mekanizma açısından 4 oyu olan tek agent demek.
+Bunun yerine her agent FARKLI bir altküme alıyor: 5 dilimin 31 boş olmayan
+altkümesi var, 20 tanesi seçiliyor, tekilller önce. Test bütün çiftleri gezip
+aynı altkümeyi paylaşan agent bulursa isim vererek kırmızıya düşüyor.
+
+32. agent istenirse `buildAgentPool` sessizce tekrar etmek yerine FIRLATIYOR.
+
+### İmza uyumluluğu tek gerçek risktir, test edildi
+
+Agent'ın imzası `@ethonline/api`'nin `verifyReportSignature`'ı tarafından kabul
+edilmek zorunda. Kanonik mesaj kopyalanmadı, `@ethonline/api`'den import edildi:
+byte-byte aynı iki kopya, biri dokunulduğu an kayar ve belirti "anahtar sorunu"
+gibi görünen bir 401 olur — agent çekildiği anda, bond'u kaybederek.
+
+Test round-trip'i doğruluyor, ayrıca imzanın HAM olasılığı kapsadığını: 0.004
+raporlanıyor, kırpılmış 0.01'e karşı doğrulama BAŞARISIZ oluyor. Kırpmanın
+denetlenebilir kalmasının kanıtı bu.
+
+### Üç davranış, üç demo senaryosu
+
+`lazy` bir öncekini TAM olarak kopyalıyor, yaklaşık değil. S_CEM(r,q,q)=log(q/q)=0
+her r için; binde bir sapsa binde bir ödenirdi ve senaryo 3 sıfır yerine
+"sıfıra yakın" gösterirdi. `liar` modele önce gerçekten soruyor, sonra tersini
+raporluyor — marketin düzelttiği şeyin gerçek olması için.
+
+### transport.ts düzeltmesi
+
+`httpAgentTransport` agent'ın döndüğü `sliceIds`, `evidenceCostUsd` ve
+`evidenceDigest` alanlarını düşürüyordu. `AgentReportResponse` bunları tanımlıyor
+ve `app.ts` annotation olarak saklıyor, yani kanıt maliyeti arayüze hiç
+ulaşmıyordu — Graph anlatısının tam ölçülebilir kısmı. Alanlar taşınıyor, ama
+güvenilerek değil filtrelenerek: aynı güvenilmez kanaldan geliyorlar.
+
+### ADIM 19 KAPANDI — dilimler canlı veride
+
+Studio anahtarı girildi. Konu protokolü ve akranlar gateway'de tek tek
+doğrulandı. Uniswap v3 ELENDİ: Messari deployment'ı `schemaVersion 4.0.0`,
+diğerleri 1.3.x, ve `comparative` tek sorgu metnini hepsine gönderdiği için
+major sürüm karışamaz. Balancer V2 ağda bozuk (`indexing_error`), pancakeswap-v3
+tahsis edilmemiş (`no allocations`).
+
+Seçilen: subject Curve Finance (1.3.0), akranlar Sushiswap + Bancor V3 + Saddle
++ Uniswap V2, bridge Arbitrum One Bridge (1.2.0).
+
+```
+liquidity     9/10 sinyal, 1 sorgu, $0.0100
+holders      10/10 sinyal, 1 sorgu, $0.0100
+activity     13/13 sinyal, 1 sorgu, $0.0100
+bridge       11/11 sinyal, 1 sorgu, $0.0100
+comparative  11/11 sinyal, 5 sorgu, $0.0500
+[PASS] Every slice produces a distinct signal set (Assumption 4)
+toplam: 9 sorgu, $0.09
+```
+
+### Flaky test düzeltildi
+
+`app.test.ts > answers 503, not a bare 500` tam suite altında 5 sn timeout'a
+takılıyordu, tek başına 349 ms'de geçiyordu. Sebep test içindeki dinamik
+`import('../src/payment.js')` — @x402 paketlerini paralel worker yükü altında
+süresinde çözemiyordu. Statik import'a alındı.
+
+### Kalan iş
+
+ADIM 22 (`POST /resolve`) ve canlı LLM koşusu. ADIM 4 (ENS spike) hâlâ açık.
+
+---
+
+## ADIM 22 — x402 ile Satılan Çözümleme Servisi
+
+- **Tarih:** 2026-09-12
+- **Durum:** GEÇTİ (kod + test). Canlı koşu ayrı kayıt olarak düşülecek.
+- **Test:** 20 yazıldı, 20 geçti
+- **Tam suite:** 711/711 yeşil (34 dosya), `pnpm -r build` temiz
+
+### Asıl tasarım kararı: istek marketi BEKLEMİYOR
+
+ROADMAP "istek gelince market koşar ya da cache döner" diyor. Senkron koşmak
+mümkün değil: 20 bond + turlar + settlement ADIM 17'de ölçüldüğü gibi ~100 sn,
+hiçbir istemci o kadar beklemez, hiçbir reverse proxy izin vermez.
+
+| Durum | Yanıt |
+|---|---|
+| Soru daha önce cevaplanmış | 200, cevap + doğrulama bilgisi |
+| Aynı soruya market koşuyor | 202, mevcut marketin id'si |
+| Hiç market yok | 202, yeni market açıldı, izlenecek adres |
+
+Elenen iki alternatif: isteği bloke etmek (timeout olur ve hiçbir şey için para
+alınmış olur), ve arka planda market koşarken modelin tahminini satmak —
+ikincisi mekanizmanın hiç üretmediği bir cevabı satmak olurdu, ki bu servisin
+asla yapmaması gereken tek şey.
+
+### Aynı soruya İKİNCİ market açılmıyor
+
+Testlerin en önemlisi bu. İki market aynı soruda agent havuzunu bölüyor ve her
+biri bilginin yarısından iki ayrı fiyat üretiyor — paper'ın eledigi paralel
+market tasarımı (PLAN 6.7). Bu sisteme bir tasarım kararı olarak değil, iki
+alıcının aynı soruyu saniye arayla sorması olarak sızardı. `findPendingMarket`
+normalize edilmiş soru anahtarıyla bunu kapatıyor.
+
+Soru normalizasyonu bilerek dar: büyük/küçük harf, boşluk, sondaki noktalama.
+Kök bulma veya eşanlamlı eşleştirme kimsenin sormadığı bir soruya cevap satmak
+olurdu ve alıcının bunu fark etme yolu yok. Test bunu da doğruluyor.
+
+### Cevap kendi kanıtını taşıyor
+
+`verify.hcsTopicId` + `mirrorUrl` dönüyor. Alıcı aynı diziyi public mirror
+node'dan okuyup kapanış fiyatını kendi hesaplayabiliyor, bu sunucuya hiç
+güvenmeden. Doğrulanamayan bir cevap bir oracle kadar değerlidir — ki bu
+mekanizmanın var olma sebebi tam olarak ondan kaçınmak.
+
+Breakdown da dönüyor: tek bir olasılık denetlenebilir değil. Sekiz agent'ın
+farklı dilimlere bakıp yakınsadığını görmek, cevapla iddia arasındaki fark.
+
+### Geçersiz test kaldırıldı, zayıflatılmadı
+
+`app.test.ts` içindeki `POST /resolve > is declared but not built until STEP 22`
+testi 501 ve "STEP 22" metni bekliyordu. ADIM 22 o stub'ı sildi, yani test artık
+var olmayan bir şeyi kontrol ediyordu. Gevşetilmedi, kaldırıldı; rotanın gerçek
+davranışı `test/resolve.test.ts`'te.
+
+### TUZAK: CRLF
+
+app.ts'i birebir metin değişimiyle yamamak ilk denemede sessizce başarısız oldu.
+`.gitattributes` `* text=auto eol=lf` diyor ama çalışma ağacındaki app.ts CRLF
+(785 \r). LF ile yazılmış needle eşleşmiyor. Script artık LF'e normalize edip
+düzenliyor ve geldiği biçimde geri yazıyor. Script hedefi bulamayınca
+`writeFileSync`'e varmadan fırlattığı için dosya bozulmadı — birebir eşleşme
+kullanmanın sebebi bu.
+
+### Uydurulan API tip kontrolüyle yakalandı
+
+Testte `ledger.messages(topicId)` yazmıştım; `MemoryLedger`'ın yüzeyi
+`topics: Map<string, HcsMessage[]>` + `all()`. Doğrulanmadan yazılmış bir
+assertion'dı. `topics.get()` ile düzeltildi.
+
+### Kalan iş
+
+Canlı koşu: `pnpm agents` ile filo, ardından gerçek bir `POST /resolve`.
+ADIM 4 (ENS spike) hâlâ açık.
+
+---
+
+## ADIM 20-22 CANLI KOŞU — gerçek agent'lar, gerçek kanıt
+
+- **Tarih:** 2026-09-12
+- **Durum:** GEÇTİ
+- **Tam suite:** 712/712 yeşil (34 dosya)
+- **Komut:** `pnpm agents` + `pnpm check:resolve`
+
+### Ne koştu
+
+20 agent, **ayrı süreçler**, her biri kendi Hedera anahtarıyla, kendi Graph
+bütçesiyle ve kendi dilim altkümesiyle. Orchestrator onlara HTTP üzerinden
+ulaştı. Bu, birim testlerin (sahte transport) ve demo sunucusunun (süreç içi
+senaryolu transport) hiç kapsamadığı yapılandırma — ve tek gönderilen o.
+
+```
+[PASS] 20 agents registered, every agent published an endpoint
+[PASS] Answers 202, not a guess
+[PASS] Asking again points at the same market, never a second one
+[PASS] 20 agents bonded (minimum 20)
+[PASS] 5 reports in 23.1s, 0 timed out
+       1. agent-10 P(yes)=0.2   2. agent-16 0.25   3. agent-11 0.3
+       4. agent-14 0.45         5. agent-13 0.3
+[PASS] Market closed (stopping-rule)
+[PASS] 5 reports carried slice + cost metadata — evidence spend $0.1900
+[PASS] Settled in 3 chunks, books balance: in 2099314719 = out 2099314719
+[PASS] The price sold IS the terminal report — sold 0.3, terminal 0.3
+[PASS] The answer carries the topic it can be checked against
+```
+
+Graph track'inin asıl iddiası burada kapanıyor: agent'lar kanıtı market
+içinde satın aldı, kanıt paranın kime gideceğini belirledi, ve alıcıya
+maliyeti ($0.19) cevapla birlikte bildirildi.
+
+### TUZAK: ölü süreç portu gasp etti, koşu TAMAMEN yeşil ve TAMAMEN sahteydi
+
+Bu, bugünün en pahalı bulgusu ve demo günü fark edilmesi imkânsıza yakındı.
+
+Önce filoyu `--offline` (stub model) koşturdum, sonra durdurup gerçek
+yapılandırmayla (OpenAI + Graph) tekrar başlattım. İkinci koşu **birinciyle
+birebir aynı** çıktıyı verdi: aynı olasılıklar dört ondalık basamağa kadar,
+0.1 saniye, `$0.0000` kanıt harcaması. Filo ise açılışta gururla
+`Model openai:gpt-4o-mini` ve `Evidence The Graph gateway` yazıyordu.
+
+Sebep: arka plan görevini durdurmak kabuğu öldürdü, altındaki node sürecini
+değil. Eski stub agent'lar 4100-4119'da dinlemeye devam etti. Windows dışlayıcı
+port bağlama uygulamadığı için yeni filo aynı portlara **hatasız** bağlandı,
+20 agent'ı "registered" diye raporladı, ve istekleri eski stub'lar cevapladı.
+
+```
+PID 42836 tek basina 4100-4104'u tutuyordu
+PID 31816 onun tsx sarmalayicisi
+```
+
+**Nasıl yakalandı:** stub deterministik olduğu için iki koşunun olasılıkları
+birebir aynı çıktı. Gerçek bir model bunu asla yapmaz. Üç işaret birlikte
+kesindi — aynı sayılar, $0 kanıt harcaması, 0.1 saniye.
+
+**Düzeltme:** her agent sunucusu `randomUUID` ile bir `instanceId` üretiyor ve
+`/health`'te yayınlıyor. Filo, portu bağladıktan sonra kendi adresine sorup
+dönen kimliğin kendisininki olduğunu doğruluyor; değilse gürültülü şekilde
+duruyor. Portu bağlamak ona sahip olmak demek değil.
+
+Test de eklendi: iki sunucu farklı kimlik üretmeli ve `/health` kendi
+kimliğini dönmeli.
+
+### Yanıt süresi mekanizmanın cezası olmamalı
+
+Orchestrator'ın varsayılanı 60 sn. Üç dilimli gerçek bir agent önce üç Graph
+sorgusu yapıyor, sonra kendi timeout'u 45 sn olan bir modeli bekliyor. 60'ta
+bırakmak yavaş bir sorguyu suskun agent gibi gösterirdi — ve suskun agent
+teminatının tamamını kaybeder. `check:resolve` bunu 120 sn'ye çekiyor
+(`REPORT_TIMEOUT_MS`). Gecikmenin bedelini kronometre değil mekanizma
+kesmeli.
+
+Gerçek koşuda 5 rapor 23.1 saniye sürdü, 0 timeout.
+
+---
+
+## ADIM 31 — Demo Senaryolarının Otomasyonu
+
+- **Tarih:** 2026-09-12
+- **Durum:** GEÇTİ
+- **Komut:** `pnpm scenarios` (offline, deterministik) / `pnpm scenarios --real`
+- **Sonuç:** 4 senaryo, 4 PASS
+
+### Agent'lar burada süreç içinde, bilerek
+
+`check:resolve` HTTP yolunu 20 ayrı süreçle zaten kanıtladı. Senaryoların
+ihtiyacı farklı: her agent'ın neye inandığını kontrol etmek ve bunu defalarca
+koşturmak. Transport gerçek `Agent` sınıfını doğrudan çağırıyor ve gerçek
+anahtarla imzalıyor — mekanizma, skorlama ve settlement değişmedi, sadece
+teslimat kısaldı.
+
+### HATA: boş küme üzerinde PASS veren assertion
+
+İlk koşuda senaryo 3 iki raporda kapandı, ikisi de flat-fee, yani skorlanan
+kopyacı sayısı **sıfırdı**. `afterFirst.every(...)` boş dizide `true` döndüğü
+için "EVERY ONE IS EXACTLY ZERO" yazdı ve PASS verdi. Hiçbir şey test
+edilmemişti.
+
+Bu, demonun en güçlü anının hiçbir şey kanıtlamaması demekti ve çıktıya bakan
+kimse anlamazdı. Kabul koşulu artık en az 3 skorlanan kopyacı istiyor: tek
+satırlık sıfır doğru ama ikna edici değil, iddia "hepsi, tam olarak sıfır".
+
+### Yeniden deneme neden hile değil
+
+Durma zarı gerçek, alpha=1/8 ile market ilk raporda kapanabiliyor ve
+kapanıyor. Senaryo ne istediğini söylüyor, o çıkana kadar market açılıyor.
+Her denemeye AYRI topic veriliyor, yani ayrı hash zinciri ve ayrı zar dizisi.
+Hiçbir şey düzenlenmiyor, hiçbir zar yeniden ağırlıklandırılmıyor; elenen
+marketler erken kapandı, ki bu mekanizmanın doğru çalışması.
+
+`demo-server.ts` aynı deseni ADIM 27'de zaten kurmuştu.
+
+### Yalancı 12. denemede tuttu — bütçe yükseltildi
+
+Yalancının hem çekilmesi hem flat-fee kuyruğunun dışına düşmesi gerekiyor,
+kabaca dörtte bir ihtimal. 12 deneme tam sınırda tuttu; bir eksik olsa senaryo
+sadece şanssızlıktan FAIL raporlayacaktı. Şart gevşetilmedi, bütçe 24'e
+çıkarıldı.
+
+### Çıktılar
+
+```
+1. NORMAL          13 rapor, 10 skorlanan, fiyat 0.5448 -> 0.3513
+2. YALANCI         agent-04: -0.158080639542 (scored) — kendi teminatindan odedi
+3. TEOREM 7        5 skorlanan kopyaci, hepsi 0.000000000000
+                   largest |payout| = 0.000e+0
+4. ASKER SINIRI    harcanan -0.409266884 <= tavan 0.693147181 (b log 2)
+```
+
+Senaryo 4'te harcamanın negatif olması ADIM 30'da da görülmüştü: market fiyatı
+yanlış yöne taşıyanlardan aldığını doğru yöne taşıyanlara ödediğinden fazla
+topluyor. Sınır maliyeti bağlıyor, işareti değil.
+
+### Kalan iş
+
+ADIM 32 (README'ler), frontend görsel doğrulaması, ADIM 33 (videolar).
+ADIM 4 (ENS spike) hâlâ açık.
+
+---
+
+## ADIM 32 — README ve Mimari
+
+- **Tarih:** 2026-09-12
+- **Durum:** KISMEN GEÇTİ — README ve mimari yazıldı, **frontend görsel
+  doğrulaması hâlâ yapılamadı** (Chrome eklentisi bağlı değil).
+
+### README İngilizce'ye çevrildi
+
+Eskisi Türkçe'ydi ve iç kullanım içindi. Bu dosya ETHGlobal jürisinin okuyacağı
+teslim artefaktı, dolayısıyla İngilizce. PLAN, ROADMAP ve bu kayıt Türkçe
+kalıyor; README'den link veriliyor ve hangisinin hangi dilde olduğu belirtiliyor.
+
+### Dürüstlük beyanları genişletildi
+
+PLAN Bölüm 14 beş madde istiyordu (agent operasyonu, k, havuz tükenmesi,
+Varsayım 4, efor). README'de dokuz madde var; dördü bugün eklendi:
+
+| Yeni madde | Neden |
+|---|---|
+| ENS bu sürümde yok | Planlanmıştı, yapılmadı. Stub bile yok, iddia da yok |
+| Model OpenAI, Claude değil | PLAN `claude-sonnet-5` diyordu |
+| Ulaşılamayan facilitator çıplak 500 döner | `@x402/express` kütüphane sınırı |
+| Transfer parçaları birbirine göre atomik değil | Hedera tek transferde hesap sayısını sınırlıyor |
+
+Ayrıca en kolay abartılacak yer açıkça ayrıldı: **zincir seviyesindeki uçtan
+uca kanıt ile 20 agent'lık koşu AYRI koşular.** Para, HCS yazımı ve settlement
+gerçek Hedera testnet'inde (ADIM 17) doğrulandı; 20 agent'lık koşu ucuza
+tekrarlanabilsin diye bellek-içi defter kullanıyor. İkisi de gerçek, ama
+hiçbiri diğeri değil. Bunu "uçtan uca testnet'te çalışıyor" diye tek cümleye
+sıkıştırmak yanlış olurdu.
+
+### docs/architecture.md
+
+İki mermaid diyagramı (sistem ve tur sırası), para akışı tablosu, bond'un neden
+giriş ücreti değil pozisyon limiti olduğu, ve beş dilim. Tur sırası diyagramı
+zarın neden yazımdan SONRA atıldığını gösteriyor — okuyan tek bakışta görsün
+diye metin değil sekans olarak.
+
+### Kalan iş
+
+Frontend görsel doğrulaması (Chrome eklentisi gerekiyor), ADIM 33 (videolar),
+ADIM 34 (submission). ADIM 4 (ENS spike) kapatılmadı ve bu sürümde
+kapatılmayacak.
+
+---
+
+## ADIM 17+20+21+22 BİRLEŞİK — gerçek agent'lar GERÇEK ZİNCİRDE
+
+- **Tarih:** 2026-09-12
+- **Durum:** GEÇTİ
+- **Komut:** `pnpm agents` + `pnpm check:orchestrator --external-agents`
+
+### Bugüne kadar iki yarı hiç birleşmemişti
+
+ADIM 17 zincir yarısını kanıtlıyordu (gerçek x402, gerçek HCS, gerçek HBAR
+settlement) ama agent'ları bir formüldü: `p = 0.6*fiyat + 0.4*sinyal`, ne LLM
+ne Graph, üstelik yirmisi tek süreçte. `check:resolve` ise agent yarısını
+kanıtlıyordu (20 ayrı süreç, model, ödemeli Graph sorguları) ama bellek-içi
+defterle.
+
+İkisi de gerçekti, hiçbiri diğeri değildi. "Uçtan uca çalışıyor" cümlesi bu
+repoda hiçbir şeyin arkasında durmadığı tek iddiaydı.
+
+### Düzeltme: --external-agents
+
+`check-orchestrator.ts` zaten gerçek zincir koşucusuydu, tek eksiği agent'ları
+kendi içinde stub olarak açmasıydı. Bayrak, `startAgents` yerine filonun
+4100-4119'daki endpoint'lerini kaydettiriyor. Filo da kayıt başarısızlığına
+dayanıklı hale getirildi: API'ye ulaşamayınca `fetch` fırlatıp 20 dinleyen
+agent'ı birden götürüyordu, ki bir filonun yapmaması gereken tam olarak bu.
+
+### Üç koşu, üçü de zincirde
+
+| Koşu | Topic | Sonuç |
+|---|---|---|
+| 1 | 0.0.10499813 | 17 rapor, 14 skorlanan, stopping-rule — **2 kontrol kırmızı** |
+| 2 | 0.0.10499916 | tüm kontroller yeşil, ama ilk turda kapandı, 0 skorlanan |
+| 3 | 0.0.10499955 | **7 rapor, 4 skorlanan, tüm kontroller yeşil** |
+
+### İlk koşudaki iki kırmızı BAYAT ASSERTION'DI
+
+`Ledger holds all 20 events — got 23` ve `Ends with market-close then
+settlement`. Testi gevşetmeden önce iddiayı doğruladım:
+
+- `settlement-chunk` `hcs-message.ts`'te birinci sınıf mesaj tipi, kendi şema
+  doğrulamasıyla
+- `writeChunkOutcome` her transfer parçası için bunu bilerek yazıyor; gerekçe
+  yorumda: makbuzu kaybetmek denetlenebilirliğe mal olur, iki kez ödemekten
+  ucuzdur
+- mirror node'dan okunan zincir tam da tasarlanan dizi: 1 + 17 + 1 + 1 + 3 = 23
+
+Yani defter doğruydu, kontrol ADIM 16 sertleştirmesinden önce yazılmıştı ve
+onunla birlikte güncellenmemişti. Beklenen sayı `+ receipts.length` ile
+düzeltildi, kuyruk kontrolü market-close → settlement → N× settlement-chunk
+yapısını arayacak şekilde yeniden yazıldı.
+
+Kendi yorumumda da bir hata yaptım ve düzelttim: "before and after it lands"
+yazmıştım, oysa parça başına tek mesaj yazılıyor.
+
+### Üçüncü koşunun çıktısı
+
+```
+[PASS] All 20 agents registered
+[PASS] Market opened and paid for      mkt-2026-09-12-001 on 0.0.10499955
+[PASS] Every bond is in the pool       20/20, hepsi x402 ile
+  # 1 agent-05 p=0.816   # 2 agent-19 p=0.308   # 3 agent-02 p=0.428
+  # 4 agent-17 p=0.366   # 5 agent-14 p=0.717   # 6 agent-08 p=0.375
+  # 7 agent-10 p=0.309 CLOSE
+[PASS] Market closed                   7 rapor, stopping-rule
+[PASS] The reference is the terminal agent
+[PASS] The plan balances exactly       2099314719 tinybar in and out
+[PASS] All 3 transfer transactions succeeded
+[PASS] The treasury is square          delta 0.00000000 HBAR
+[PASS] Every agent that answered was paid   20 agents, 0 slashed
+[PASS] Ledger holds all 13 events
+[PASS] Ends with market-close, settlement, then one message per transfer chunk
+[PASS] Consensus order is intact
+ORCHESTRATOR OK — a full market ran and the books closed.
+```
+
+Asker net maliyeti 0.73778074 HBAR, iade 0.62580700 HBAR.
+
+### Gözlem: comparative dilimi oynak olabilir
+
+`agent-05` (yalnız `comparative`) birinci koşuda tam 0.500 (yani prior),
+üçüncüde 0.816 raporladı. Aynı agent, aynı dilim, aynı subject subgraph. Soru
+metni farklıydı ama bu fark tek başına açıklamıyor. Üç ihtimal: dilimin kanıtı
+koşular arası oynak, model o dilimde gürültülü, ya da kanıt zayıf gelince
+model prior'a yaslanıyor. Kapatılmadı, not düşüldü.
+
+### Kalan iş
+
+`POST /resolve` gerçek zincirde hiç koşmadı — zincir koşuları marketi
+`POST /market` üzerinden açıyor. README'de madde olarak duruyor.

@@ -13,7 +13,8 @@
 import { describe, expect, it, beforeEach } from 'vitest';
 import request from 'supertest';
 import { beliefFromProbability, DEFAULT_PARAMS } from '@ethonline/core';
-import { createApp, type Api } from '../src/app.js';
+import { createApp, isUpstreamFailure, type Api } from '../src/app.js';
+import { isPaidRoute, onlyPaidRoutes, withFacilitatorErrors } from '../src/payment.js';
 import { depositTinybar, bondTinybar } from '../src/pricing.js';
 import { agentPool, createFakeLedger, makeTestAgent, type FakeLedger, type TestAgent } from './helpers.js';
 
@@ -380,13 +381,6 @@ describe('public reads', () => {
   });
 });
 
-describe('POST /resolve', () => {
-  it('is declared but not built until STEP 22', async () => {
-    const res = await request(api.app).post('/resolve').send({ question: 'q' }).expect(501);
-    expect(res.body.detail).toMatch(/STEP 22/);
-  });
-});
-
 describe('when the payment infrastructure is down', () => {
   it('answers 503, not a bare 500', async () => {
     // STEP 17 hit this for real: with the facilitator unreachable the payment
@@ -394,7 +388,6 @@ describe('when the payment infrastructure is down', () => {
     // a caller cannot distinguish from "your request was malformed". One means
     // fix the request, the other means wait — a client that cannot tell them
     // apart retries the wrong one.
-    const { withFacilitatorErrors } = await import('../src/payment.js');
     const brokenGate = withFacilitatorErrors(() => {
       throw new Error('fetch failed');
     }, 'https://facilitator.example');
@@ -406,7 +399,6 @@ describe('when the payment infrastructure is down', () => {
   });
 
   it('catches an async rejection too, which is the real middleware shape', async () => {
-    const { withFacilitatorErrors } = await import('../src/payment.js');
     const brokenGate = withFacilitatorErrors(async () => {
       throw new Error('fetch failed');
     }, 'https://facilitator.example');
@@ -418,7 +410,6 @@ describe('when the payment infrastructure is down', () => {
     // A market already written to HCS can still be checked by anyone. There is
     // no reason an outage in the payment rail should stop that: nobody can
     // open a NEW market, which is right, and the record stays readable.
-    const { onlyPaidRoutes, withFacilitatorErrors } = await import('../src/payment.js');
     const brokenGate = onlyPaidRoutes(
       withFacilitatorErrors(async () => {
         throw new Error('fetch failed');
@@ -437,7 +428,6 @@ describe('when the payment infrastructure is down', () => {
   });
 
   it('knows which routes cost money', async () => {
-    const { isPaidRoute } = await import('../src/payment.js');
     expect(isPaidRoute('POST', '/market')).toBe(true);
     expect(isPaidRoute('POST', '/market/mkt-1/bond')).toBe(true);
     expect(isPaidRoute('POST', '/resolve')).toBe(true);
@@ -475,7 +465,6 @@ describe('errors reach the caller as something actionable', () => {
   });
 
   it('classifies upstream failures apart from programming errors', async () => {
-    const { isUpstreamFailure } = await import('../src/app.js');
     expect(isUpstreamFailure(new Error('fetch failed'))).toBe(true);
     expect(isUpstreamFailure(new Error('UND_ERR_CONNECT_TIMEOUT'))).toBe(true);
     expect(isUpstreamFailure(new Error('no supported payment kinds loaded'))).toBe(true);

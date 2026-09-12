@@ -22,6 +22,13 @@ import type { TransferLine } from './settlement-plan.js';
  * The deadline is enforced with an AbortSignal rather than a race against a
  * timer, so a slow agent's request is actually cancelled instead of being left
  * to arrive later and be discarded — the round has already moved on by then.
+ *
+ * WHAT COMES BACK BESIDES THE NUMBER. Only `probability` is scored, and only
+ * `signature` is checked, but an agent also reports which slices it read, what
+ * the evidence cost it and a digest of that evidence. None of it can move a
+ * payout. It is carried anyway because it is the only place the cost of the
+ * evidence is ever visible: drop it here and a market page can show what was
+ * concluded but never what it took to conclude it.
  */
 export function httpAgentTransport(): AgentTransport {
   return {
@@ -61,6 +68,17 @@ export function httpAgentTransport(): AgentTransport {
           probability: body.probability,
           signature: body.signature,
           ...(typeof body.reasoning === 'string' ? { reasoning: body.reasoning } : {}),
+          // Filtered rather than trusted: this is an agent's own account of
+          // itself and arrives over the same untrusted channel as the rest.
+          ...(Array.isArray(body.sliceIds)
+            ? { sliceIds: body.sliceIds.filter((s): s is string => typeof s === 'string') }
+            : {}),
+          ...(typeof body.evidenceCostUsd === 'number' && Number.isFinite(body.evidenceCostUsd)
+            ? { evidenceCostUsd: body.evidenceCostUsd }
+            : {}),
+          ...(typeof body.evidenceDigest === 'string'
+            ? { evidenceDigest: body.evidenceDigest }
+            : {}),
         };
       } finally {
         clearTimeout(timer);

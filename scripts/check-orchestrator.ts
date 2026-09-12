@@ -50,6 +50,23 @@ const API_PORT = 4061;
 const AGENT_PORT = 4062;
 const API = `http://localhost:${API_PORT}`;
 
+/**
+ * Run against the real agent fleet instead of the stubs below.
+ *
+ * WHY THIS FLAG EXISTS. Two halves of this system have each been proven and
+ * never at the same time. This script proves the chain half — real x402
+ * payments, real HCS, real HBAR settlement — against agents that are a
+ * formula. `check:resolve` proves the agent half — twenty processes, a model,
+ * paid Graph queries — against an in-memory ledger. Neither is the other, and
+ * "it works end to end" is the one claim in this repo that nothing would back
+ * if the two were only ever run apart.
+ *
+ * With `--external-agents` the orchestrator registers the endpoints that
+ * `pnpm agents` is already listening on, and both halves run as one market.
+ */
+const EXTERNAL_AGENTS = process.argv.includes('--external-agents');
+const AGENT_BASE_PORT = Number(process.env['AGENT_BASE_PORT'] ?? 4100);
+
 let failures = 0;
 function step(ok: boolean, name: string, detail = ''): void {
   if (!ok) failures++;
@@ -146,15 +163,22 @@ async function main(): Promise<void> {
   const apiServer: Server = await new Promise((r) => {
     const s = app.listen(API_PORT, () => r(s));
   });
-  const agentServer = await startAgents(pool);
+  // With --external-agents nothing is started here: `pnpm agents` is already
+  // listening, with real keys, a real model and a real Graph budget.
+  const agentServer = EXTERNAL_AGENTS ? undefined : await startAgents(pool);
 
   try {
     const treasuryBefore = await getBalance(hedera, treasury.accountId);
     const askerBefore = await getBalance(hedera, cfg.operatorId);
 
     // ---- register every agent -------------------------------------------
-    for (const a of pool) {
+    for (const [i, a] of pool.entries()) {
       const publicKey = PrivateKey.fromStringECDSA(a.privateKey).publicKey.toStringDer();
+      // The fleet assigns ports in pool order, and it reads the same
+      // accounts.json in the same order, so agent-01 is on the base port.
+      const endpoint = EXTERNAL_AGENTS
+        ? `http://127.0.0.1:${AGENT_BASE_PORT + i}/report`
+        : `http://localhost:${AGENT_PORT}/${a.agentId}`;
       const res = await fetch(`${API}/agents/register`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -162,7 +186,7 @@ async function main(): Promise<void> {
           agentId: a.agentId,
           accountId: a.accountId,
           publicKey,
-          endpoint: `http://localhost:${AGENT_PORT}/${a.agentId}`,
+          endpoint,
         }),
       });
       if (res.status !== 201) throw new Error(`Registering ${a.agentId} failed: ${res.status}`);
@@ -283,7 +307,11 @@ async function main(): Promise<void> {
 
     // ---- the public ledger ------------------------------------------------
     console.log('\n  Reading the ledger back ...');
-    const expected = state.reports.length + state.timedOutAgents.length + 3;
+    // open + close + settlement, plus one `settlement-chunk` per transfer.
+    // The chunk messages were added by STEP 16's hardening and this count did
+    // not follow, so a correct ledger was being reported as three events short.
+    const expected =
+      state.reports.length + state.timedOutAgents.length + 3 + receipts.length;
     let entries: Awaited<ReturnType<typeof readTopicMessages>> = [];
     for (let attempt = 1; attempt <= 12; attempt++) {
       await sleep(2500);
@@ -295,10 +323,20 @@ async function main(): Promise<void> {
     const types = entries.map((e) => e.message?.type);
     step(entries.length === expected, `Ledger holds all ${expected} events`, `got ${entries.length}`);
     step(types[0] === 'market-open', 'First message is market-open');
+    // The tail is no longer close-then-settlement. STEP 16's hardening writes
+    // one `settlement-chunk` message per transfer, recording how that chunk
+    // ended, so a settlement that stops halfway can be resumed without paying
+    // a chunk twice. This assertion predates that and was failing on correct
+    // output: the chunk messages are the feature, not noise after it.
+    const closeAt = types.indexOf('market-close');
+    const tail = types.slice(closeAt);
     step(
-      types[types.length - 2] === 'market-close' && types[types.length - 1] === 'settlement',
-      'Ends with market-close then settlement',
-      types.slice(-3).join(' -> '),
+      closeAt !== -1 &&
+        tail[1] === 'settlement' &&
+        tail.length > 2 &&
+        tail.slice(2).every((t) => t === 'settlement-chunk'),
+      'Ends with market-close, settlement, then one message per transfer chunk',
+      types.slice(-4).join(' -> '),
     );
     step(
       entries.every((e) => e.parseError === undefined),
@@ -319,7 +357,7 @@ async function main(): Promise<void> {
     console.log('='.repeat(74));
   } finally {
     apiServer.close();
-    agentServer.close();
+    agentServer?.close();
     hedera.close();
   }
 
