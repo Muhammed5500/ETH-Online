@@ -25,21 +25,43 @@ rejected, are in [PLAN.md](./PLAN.md).
 
 | Piece | Status |
 | --- | --- |
-| Mechanism: scoring, stopping, settlement, invariants | complete, 712 unit tests |
+| Mechanism: scoring, stopping, settlement, invariants | complete, 750 unit tests |
 | Hedera: deposits, bonds, HCS ledger, randomness, settlement | verified end to end on **testnet** |
 | x402 payment gate on Hedera (Blocky402) | live on the paid routes |
 | The Graph: five data slices over Messari standardized subgraphs | live data, real queries, real cost |
 | 20 agents buying evidence and reporting over HTTP | verified on **Hedera testnet**, real x402 payments |
 | `POST /resolve`, the x402-gated resolution service | live |
-| Frontend: market list, live chart, settlement view | built, not yet visually reviewed |
+| Frontend: market list, live chart, settlement view | built, served by the API itself, paid from a browser wallet |
+| Runner: bonding closes, rounds run, settlement executes, unfilled markets refund | in the API process, verified on **testnet** |
+| Agents paying their own bonds over x402 | in the fleet, verified on **testnet** |
+| Agent directory: slice subsets and each agent's record, counted from the markets | built |
 | ENS v2 agent identity | **not in this version**, see Limits |
+
+## The whole thing, running
+
+Two processes. The API serves the pages, takes the money, drives the rounds and
+settles; the fleet is twenty agents that watch for markets and pay their own way
+in.
+
+```bash
+pnpm --filter @ethonline/web build   # once, so the API has pages to serve
+pnpm api                             # http://127.0.0.1:4020
+pnpm agents                          # another terminal
+```
+
+Open the page, connect a wallet, ask a question. The deposit is paid over x402,
+twenty agents bond themselves, the rounds run against live Graph data and a
+model, and the settlement pays everyone from the treasury. One run on testnet,
+[topic 0.0.10504951](https://hashscan.io/testnet/topic/0.0.10504951): three
+reports, 0.184 to 0.188 to 0.379, and the treasury closed at
+`in 2099314719 = out 2099314719`.
 
 ## Quick start
 
 ```bash
 pnpm install
 cp .env.example .env      # fill in the keys listed below
-pnpm test                 # 712 tests, no network, a few seconds
+pnpm test                 # 750 tests, no network, a few seconds
 ```
 
 Required for a full run:
@@ -225,11 +247,11 @@ scripts           the gates listed above
 
 | Command | Does |
 | --- | --- |
-| `pnpm test` | 712 unit tests, no network |
+| `pnpm test` | 750 unit tests, no network |
 | `pnpm test:integration` | real testnet, slow, separate on purpose |
 | `pnpm build` | typecheck everything |
-| `pnpm demo` | the whole API on an in-memory ledger, markets pre-seeded |
-| `pnpm agents` | the 20-agent fleet (`--offline` for a stub model) |
+| `pnpm demo` | the whole API on an in-memory ledger, markets pre-seeded. `POST /market` is gated by the real x402 gate whenever a treasury is configured, so asking a question costs the deposit; `--free` turns that off |
+| `pnpm agents` | the 20-agent fleet, each paying its own bonds (`--offline` for a stub model, `--no-bond` to only listen) |
 | `pnpm scenarios` | the four scenarios (`--real` for live model and evidence) |
 | `pnpm kcalc` | the `k` calculator from Theorems 1 and 4 |
 
@@ -261,6 +283,16 @@ we.
 Anthropic key was available, so `gpt-4o-mini` is used behind a one-function
 interface. Nothing in the mechanism depends on which model produced a number.
 
+**A paid handler runs before its payment settles, so its effect is
+conditional.** `@x402/express` orders a paid route as verify, handler, settle:
+if settlement fails the library answers 402 and nothing undoes what the handler
+already wrote. A live run on 2026-09-12 recorded twenty bonds against eighteen
+payments and the treasury closed 2 HBAR down, which the run's own treasury
+invariant caught. Effects on the three paid routes are now registered with an
+undo that runs before the 402 leaves the server. What cannot be undone is HCS: a
+market whose deposit never settled leaves a topic holding one `market-open`
+message and nothing after it.
+
 **An unreachable x402 facilitator returns a bare 500.** `@x402/express` writes
 that response itself, before any wrapper or error handler can see it. Mitigated
 with a startup warm-up, a configurable timeout and client-side retry, but not
@@ -269,6 +301,21 @@ fixable from the application layer.
 **Settlement transfers are chunked and not atomic across chunks.** Hedera caps
 how many accounts one transfer may touch. A settlement that stops partway is
 recorded, resumable, and never pays a chunk twice.
+
+**The market store is in memory, and a restart empties it.** Every report,
+close and settlement is on its HCS topic and can be recomputed by anyone, but
+nothing reads them back: restarting the API leaves the pages showing no markets
+while the markets themselves are still on chain and still verifiable. Reports
+that arrive for a market the server has forgotten are refused, so a restart
+mid-market strands that market's deposit and bonds in the treasury until
+somebody refunds them by hand. Rehydrating a market from its topic is the fix
+and is not written.
+
+**The demo server takes the deposit but does not give it back.** `pnpm demo`
+runs the production x402 gate over an in-memory ledger, so a market really is
+paid for and the HBAR really reaches the treasury. Settlement then records the
+transfers instead of sending them, because the twenty agents it pays are
+fabricated accounts. The round trip is `pnpm api` with `pnpm agents`.
 
 **The resolution service has not been run against the chain.** `POST /resolve`
 is proven end to end against the in-memory ledger, and the on-chain markets

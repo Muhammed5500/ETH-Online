@@ -1,5 +1,28 @@
 /**
- * A demo server: the whole API, no chain, no facilitator, no money.
+ * A demo server: the whole API over an in-memory ledger.
+ *
+ * TWO MODES, AND THE DEFAULT IS THE PAID ONE.
+ *
+ *   paid   HEDERA_TREASURY_ID and HEDERA_TREASURY_KEY are set. `POST /market`
+ *          goes through the SAME x402 gate the real server uses, quoting the
+ *          same computed deposit, settled by the same facilitator against
+ *          Hedera testnet. A browser with no wallet gets 402 and no market.
+ *   free   no treasury configured, or `--free`. Anyone can open a market for
+ *          nothing. Fine for building pages, wrong for showing the product,
+ *          so the banner says which mode is running in both cases.
+ *
+ * WHAT IS GATED HERE AND WHAT IS NOT. Only `POST /market`, the one action a
+ * visitor performs. Bonds stay free because this demo's twenty agents are
+ * fabricated accounts with no balance; on the real server they pay like
+ * everybody else. That difference is a property of the fake pool, not of the
+ * gate.
+ *
+ * WHAT THE ASKER'S HBAR ACTUALLY BUYS IN PAID MODE. The deposit really leaves
+ * the wallet and really lands in the treasury. The refund does NOT come back:
+ * settlement here runs through a payer that records transfers instead of
+ * sending them, because the agents being paid do not exist. So paid mode
+ * proves the price and the payment rail, not the round trip. `pnpm api` with
+ * `pnpm agents` is the run where the money comes back.
  *
  * WHY THIS EXISTS. The real server needs Hedera credentials, a reachable
  * facilitator and about a hundred seconds to run one market. Building four
@@ -23,17 +46,26 @@
  * Run:  pnpm demo
  */
 import './load-env.js';
-import express from 'express';
+import express, { type RequestHandler } from 'express';
 import { existsSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PrivateKey } from '@hashgraph/sdk';
 import { DEFAULT_PARAMS, type MarketParams } from '@ethonline/core';
+import { readEnv, treasuryFromEnv } from '@ethonline/hedera';
 import {
   canonicalReportMessage,
   createApp,
   createMemoryLedger,
+  createPaymentGate,
+  DEFAULT_API_CONFIG,
+  DEFAULT_FACILITATOR_TIMEOUT_MS,
+  depositTinybar,
+  formatTinybar,
+  MarketStore,
   Orchestrator,
+  warmUpFacilitator,
   type AgentTransport,
   type Payer,
   type PayerReceipt,
@@ -41,6 +73,23 @@ import {
 } from '@ethonline/api';
 
 const PORT = Number(process.env['DEMO_PORT'] ?? 4021);
+
+/** `pnpm demo --free` opens markets for nothing, the way this server used to. */
+const FREE_MODE = process.argv.includes('--free');
+
+/**
+ * Lets the seeder open its fixture markets without paying.
+ *
+ * The fixtures exist so the pages have something to render, and making them
+ * pay would mean the demo could not start without a funded wallet and a
+ * healthy facilitator. So they carry a header the gate skips.
+ *
+ * It is a per-process random value that is never printed, never written down
+ * and gone when the process exits, so nothing arriving over the network can
+ * present it. The one caller that knows it is `open()` below.
+ */
+const FIXTURE_HEADER = 'x-demo-fixture';
+const FIXTURE_TOKEN = randomUUID();
 const HERE = dirname(fileURLToPath(import.meta.url));
 const WEB_DIST = resolve(HERE, '..', 'apps', 'web', 'dist');
 
@@ -165,6 +214,25 @@ function reasonFor(agent: DemoAgent, before: number, after: number, lying: boole
     : `On the ${slice} slice, ${findings[slice]}. ${direction[0]!.toUpperCase()}${direction.slice(1)} from ${(before * 100).toFixed(1)}%.`;
 }
 
+/**
+ * Runs the x402 gate for `POST /market` and nothing else.
+ *
+ * `createPaymentGate` already narrows itself to the three paid routes, so this
+ * narrows it further rather than widening it: bonds and `POST /resolve` stay
+ * free here because the pool they would be paid by is fabricated. Wrapping is
+ * the whole change — the gate itself, the price function and the facilitator
+ * are the production ones, so a 402 seen here is the 402 the real server
+ * sends.
+ */
+function gateMarketOpen(gate: RequestHandler): RequestHandler {
+  return (req, res, next) => {
+    const path = req.path.split('?')[0] ?? req.path;
+    if (req.method !== 'POST' || !/^\/market\/?$/.test(path)) return next();
+    if (req.get(FIXTURE_HEADER) === FIXTURE_TOKEN) return next();
+    return gate(req, res, next);
+  };
+}
+
 /** Records transfers instead of sending them. */
 function demoPayer(log: Array<{ memo: string; total: bigint }>): Payer {
   return {
@@ -178,7 +246,47 @@ function demoPayer(log: Array<{ memo: string; total: bigint }>): Payer {
 
 async function main(): Promise<void> {
   const ledger = createMemoryLedger({ topicSeed: 990000 });
-  const { app, registry, markets, config } = createApp({ ledger });
+
+  // The store is built here rather than inside `createApp` because the gate
+  // needs it too: a bond's price is whatever that market set, so the price
+  // function looks the market up. Both sides must see the same store.
+  const markets = new MarketStore();
+
+  const treasury = FREE_MODE ? undefined : treasuryFromEnv();
+  const facilitatorUrl =
+    readEnv(process.env, 'BLOCKY402_FACILITATOR_URL') ?? 'https://api.testnet.blocky402.com';
+  // Scales what one mechanism unit costs. A default market is a shade under
+  // one unit, so 1 makes the deposit about 1 HBAR; drop it to 0.1 if the
+  // wallet you are demoing with is thin.
+  const hbarPerUnit = Number(
+    readEnv(process.env, 'DEMO_HBAR_PER_UNIT') ?? DEFAULT_API_CONFIG.hbarPerUnit,
+  );
+
+  // Cold-start the facilitator connection before anyone is waiting on it, for
+  // the same reason the real server does (STEP 17).
+  const warm = treasury ? await warmUpFacilitator(facilitatorUrl) : undefined;
+
+  const paymentGate = treasury
+    ? gateMarketOpen(
+        createPaymentGate({
+          treasuryAccountId: treasury.accountId,
+          facilitatorUrl,
+          facilitatorTimeoutMs: Number(
+            readEnv(process.env, 'FACILITATOR_TIMEOUT_MS') ?? DEFAULT_FACILITATOR_TIMEOUT_MS,
+          ),
+          markets,
+          defaultParams: DEFAULT_PARAMS,
+          hbarPerUnit,
+        }),
+      )
+    : undefined;
+
+  const { app, registry, config } = createApp({
+    ledger,
+    markets,
+    config: { hbarPerUnit },
+    ...(paymentGate ? { paymentGate } : {}),
+  });
   const agents = makeAgents(DEFAULT_PARAMS.minPoolSize);
   const transfers: Array<{ memo: string; total: bigint }> = [];
 
@@ -208,7 +316,8 @@ async function main(): Promise<void> {
   const open = async (question: string, params?: Partial<MarketParams>): Promise<string> => {
     const res = await fetch(`http://127.0.0.1:${PORT}/market`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      // The one caller allowed past the gate. See FIXTURE_TOKEN.
+      headers: { 'content-type': 'application/json', [FIXTURE_HEADER]: FIXTURE_TOKEN },
       body: JSON.stringify({ question, params }),
     });
     if (!res.ok) throw new Error(`open failed: ${res.status} ${await res.text()}`);
@@ -272,7 +381,34 @@ async function main(): Promise<void> {
   // symptom is baffling: this process seeds markets into THAT server's store
   // over HTTP, then cannot find them in its own. Fail loudly instead.
   const server = app.listen(PORT, async () => {
-    console.log('\nethonline DEMO server (no chain, no money)');
+    console.log('');
+    console.log(
+      `ethonline DEMO server — ledger in memory, ${treasury ? 'DEPOSITS ARE PAID FOR REAL' : 'NO PAYMENT REQUIRED'}`,
+    );
+    console.log('='.repeat(64));
+    if (treasury) {
+      console.log('  Payment     POST /market is gated by x402, the same gate the real server uses');
+      console.log(`  Treasury    ${treasury.accountId} — receives the deposit, in testnet HBAR`);
+      console.log(
+        `  Facilitator ${facilitatorUrl}  ` +
+          (warm?.ok ? `(reachable, ${warm.ms}ms)` : `(UNREACHABLE: ${warm?.error ?? 'unknown'})`),
+      );
+      console.log(
+        `  Deposit     ${formatTinybar(depositTinybar(DEFAULT_PARAMS, [0.5, 0.5], hbarPerUnit))} at the default parameters`,
+      );
+      console.log('  NOTE        the deposit is really taken and is NOT refunded here: settlement');
+      console.log('              records transfers instead of sending them, because this pool is fake.');
+      if (!warm?.ok) {
+        console.log('  WARNING     the facilitator is unreachable, so opening a market answers 503.');
+      }
+    } else {
+      console.log(
+        `  Payment     NONE — anyone can open a market for nothing${FREE_MODE ? ' (--free)' : ''}.`,
+      );
+      if (!FREE_MODE) {
+        console.log('              Set HEDERA_TREASURY_ID and HEDERA_TREASURY_KEY to charge the deposit.');
+      }
+    }
     console.log('='.repeat(64));
 
     try {
@@ -315,6 +451,67 @@ async function main(): Promise<void> {
     } catch (e) {
       console.error(`\n  Seeding failed: ${(e as Error).message}\n`);
     }
+
+    /**
+     * Picks up markets somebody else opened, and runs them.
+     *
+     * WHY THIS EXISTS. The seeding above bonds this server's pool to the
+     * markets IT creates. Nothing was watching for anyone else's, so a market
+     * opened through the Ask page sat at `bonding` with zero agents forever.
+     * That is scenario 4 in PLAN section 10, the one where a juror asks their
+     * own question and watches it run, and it was the one path through the UI
+     * that went nowhere.
+     *
+     * In paid mode a market only reaches this loop because its deposit was
+     * paid, so what gets picked up is a market somebody actually bought.
+     *
+     * Nothing about the mechanism changes. The pool bonds through the same
+     * open route any agent would use, and the market runs through the same
+     * orchestrator, dice and settlement as the seeded ones.
+     */
+    const handled = new Set(markets.list().map((m) => m.id));
+    let busy = false;
+
+    setInterval(() => {
+      if (busy) return;
+      const fresh = markets.list().filter((m) => !handled.has(m.id));
+      if (fresh.length === 0) return;
+
+      busy = true;
+      void (async () => {
+        try {
+          for (const stored of fresh) {
+            handled.add(stored.id);
+            console.log(`  picked up ${stored.id} — ${stored.question}`);
+            try {
+              for (const a of agents) {
+                await fetch(`http://127.0.0.1:${PORT}/market/${stored.id}/bond`, {
+                  method: 'POST',
+                  headers: { 'content-type': 'application/json' },
+                  body: JSON.stringify({ agentId: a.agentId }),
+                });
+              }
+              const orch = orchestrator();
+              await orch.closeBonding(stored.id);
+              await orch.runMarket(stored.id);
+              await orch.settle(stored.id, '0.0.888');
+              const done = markets.get(stored.id)!;
+              console.log(
+                `  ${stored.id} settled — ${done.market.reportCount} reports, ` +
+                  `closing price ${done.market.currentPrice()[1]}\n`,
+              );
+            } catch (e) {
+              // A market that fails here stays in the list as whatever state
+              // it reached. Marking it handled is deliberate: retrying a
+              // half-run market would bond twice and is worse than leaving it.
+              console.error(`  ${stored.id} could not be run: ${(e as Error).message}\n`);
+            }
+          }
+        } finally {
+          busy = false;
+        }
+      })();
+    }, 2000);
   });
 
   server.on('error', (e: NodeJS.ErrnoException) => {

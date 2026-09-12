@@ -2844,3 +2844,523 @@ model prior'a yaslanıyor. Kapatılmadı, not düşüldü.
 
 `POST /resolve` gerçek zincirde hiç koşmadı — zincir koşuları marketi
 `POST /market` üzerinden açıyor. README'de madde olarak duruyor.
+
+---
+
+## ADIM 27 DÜZELTMESİ — arayüzden sorulan soru hiç koşmuyordu
+
+- **Tarih:** 2026-09-12
+- **Durum:** GEÇTİ
+- **Bulan:** kullanıcı, demo sunucusunda `/new` sayfasından soru sorarak
+
+### Belirti
+
+Arayüzden sorulan soru market açıyordu ama `bonding` durumunda `bonded=0` ile
+sonsuza kadar bekliyordu.
+
+```
+mkt-2026-09-12-007  [bonding]  soru: Kollektif bilinç var mı ?
+    bonded=0  reports=0  price=0.5
+```
+
+### Sebep, iki kanıtla
+
+1. **API'de bir marketi ilerleten rota yok.** On iki rotanın hiçbiri tur
+   sürmüyor; turları `Orchestrator` sürüyor ve o `demo-server.ts` içinde,
+   süreç içinde koşuyor. HTTP'den erişilemez.
+2. **Demo agent'larının endpoint'i `demo://agent-01`.** Sahte şema. Bond HTTP'den
+   atılsa bile gerçek transport oraya ulaşamaz; o adresleri yalnızca demo
+   sunucusunun kendi senaryolu transport'u anlıyor.
+
+Demo sunucusu kendi tohumladığı marketlere kendi havuzunu bağlıyordu ve
+başkasınınkini izleyen hiçbir şey yoktu.
+
+### Neden önemli
+
+PLAN Bölüm 10, Senaryo 4 tam olarak bu: jüri kendi sorusunu sorar ve agent'ların
+canlı çalışmasını izler. Soru sorma tarafının açık olmasının tek sebebi bu
+senaryoydu ve arayüzdeki tek yol hiçbir yere çıkmıyordu. HTTP seviyesindeki
+kontroller bunu yakalayamazdı: `POST /market` 201 dönüyor, sayfa 200 dönüyor,
+her şey yeşil görünüyor.
+
+### Düzeltme
+
+`demo-server.ts` artık iki saniyede bir kendi store'una bakıp devralmadığı
+market varsa havuzu bağlıyor ve koşturuyor. Mekanizmada hiçbir değişiklik yok:
+havuz herhangi bir agent'ın kullanacağı aynı açık rotadan bond yatırıyor, market
+tohumlananlarla aynı orchestrator, aynı zar ve aynı settlement'tan geçiyor.
+
+Başarısız olan market `handled` işaretleniyor ve tekrar denenmiyor: yarım kalmış
+bir marketi yeniden denemek iki kez bond yatırmak olurdu, ki bırakmaktan kötü.
+
+### Doğrulama
+
+```
+acilan market: mkt-2026-09-12-007  topic 0.0.990007
+    2s  settled   bonded=20  reports=9  price=0.4704
+SONUC: settled, 9 rapor, kapanis fiyati 0.4704, sebep stopping-rule
+```
+
+Arayüzün kullandığı aynı rotadan sorulan soru iki saniyede devralındı.
+
+### Not
+
+Bu yalnızca demo sunucusunu ilgilendiriyor. Gerçek sunucuda (`pnpm api`) agent'lar
+kendi süreçlerinde koşuyor ve marketi `check-orchestrator` ya da bir operatör
+sürüyor; oraya otomatik devralma eklemek ayrı bir karar.
+
+---
+
+## ADIM 27 TAMAMLAMA — tarayıcı cüzdanı ve x402 ödemesi
+
+- **Tarih:** 2026-09-12
+- **Durum:** KISMEN GEÇTİ — kod, tipler ve paketleme doğrulandı; **imzalama
+  turu hiç koşmadı** (tarayıcı, cüzdan ve projectId yok). Ayrıntı aşağıda.
+- **Tam suite:** 712/712 yeşil, workspace build ve scripts tip kontrolü temiz
+
+### Tasarım kısıtı: tarayıcıya private key girmez
+
+Repodaki diğer her şey x402'yi `.env`'deki anahtarla ödüyor. Operatörün
+makinesindeki script için doğru, web sayfası için imkânsız: ziyaretçiye
+"private key'ini yapıştır" demek kestirme değil, yanlış ürün.
+
+### Bunu mümkün kılan bulgu
+
+`@x402/hedera` bir `ClientHederaSigner` alıyor ve o **düz bir nesne tipi**:
+
+```ts
+{ accountId, createPartiallySignedTransferTransaction(requirements): Promise<string> }
+```
+
+`createClientHederaSigner(accountId, privateKey)` bunun yalnızca varsayılan
+üreticisi. Cüzdan destekli bir implementasyon doğrudan yerine geçiyor; şema,
+facilitator ve sunucu farkı hiç görmüyor.
+
+Cüzdan tarafı da uyuyor: `DAppSigner.signTransaction<T>(tx): Promise<T>`
+imzalı **işlemin kendisini** döndürüyor, SignatureMap değil. x402 exact şeması
+kısmi imzalı işlem istediği için (ücreti facilitator ödeyip zincire o
+gönderiyor) bu tam olarak aranan şekil.
+
+### İşlem kurulumu birebir eşlenmeli
+
+Facilitator `verifyPayerSignature` ile ödeyenin **o donmuş gövdeyi** imzaladığını
+doğruluyor. Bir alan bile kayarsa belirti "imza tutmadı" olur ve hata ayıklayan
+kişi anahtarlara bakar, oysa sebep byte'lardır. Varsayılan imzalayıcı satır
+satır eşlendi; tek fark `tx.sign(privateKey)` yerine cüzdana gidiş.
+
+İşlem kimliğinin **facilitator'ın** hesabından üretilmesi (`TransactionId.
+generate(feePayer)`) yanlış görünen ama doğru olan kısım, koda yorum düşüldü.
+
+### TUZAK: kök barrel Reown yığınını çekiyor
+
+`DAppConnector`'ı paket kökünden import etmek `@reown/appkit-common` çözümleme
+hatası veriyor: kök barrel Reown adaptörünü de dışa veriyor. Derin yola
+(`/dist/lib/dapp`) geçildi.
+
+Bu varsayımla bırakılmadı: `lib/dapp/index.js`'ten göreli import'lar izlendi,
+12 dosyaya ulaşılıyor ve harici küme tam olarak `@hiero-ledger/{proto,sdk}`,
+`@walletconnect/{modal,sign-client,utils}`, `buffer`. **Reown erişilemez.**
+
+### TUZAK: pnpm peer'ların bir kısmını kurmuş
+
+Cüzdan paketinin kendi dizininde `@reown`, `ethers`, `@walletconnect/modal` var
+ama `sign-client` ve `utils` yok, dolayısıyla bundler o dizinden çözemiyor.
+Vite `resolve.alias` ile bu üç specifier uygulamanın kendi kopyalarına
+yönlendirildi.
+
+`.npmrc`'ye `shamefully-hoist` koymak da çözerdi ve **reddedildi**: tek bir
+paketin paketleme hatası için bütün monorepoda çözümlemeyi gevşetmek, bir
+sonrakini de gizler.
+
+### Ödeme yığını ilk yüklemede YOK
+
+Yığın (Hedera SDK + x402 + WalletConnect) uygulamanın kendisinden kat kat
+büyük ve sayfayı açanların neredeyse hiçbiri ödeme yapmıyor. `wallet.ts`
+yalnızca "Connect wallet"a basıldığında dinamik `import()` ile geliyor.
+
+```
+index-CDYxqLvS.js    664.66 kB | gzip: 200.07 kB   <- giris (taban 199 kB)
+wallet-C5xS1KHf.js  3,417.54 kB | gzip: 730.64 kB   <- tembel parca
+```
+
+### Kendi hatam: taban bundle rakamını yanlış aktardım
+
+Ölçmeden önce "mevcut bundle 89 kB gzip" dedim; o ADIM 27 kaydından kalma eski
+bir sayıydı, aradan grafik ve settlement ekranı geçmiş. Gerçek taban 199 kB.
+Kurduğum "dokuz katı" çerçevesi bu yüzden yanlıştı. Karar (tembel yükleme)
+değişmedi, gerekçesi düzeldi.
+
+### Diğer düzeltmeler
+
+| Ne | Neden |
+|---|---|
+| `network` tipi duz `string` yerine CAIP-2 sablon tipi | `@x402/core` boyle istiyor; cast yerine kisit tasindi |
+| `envDir: '../..'` | Vite env'i `apps/web`'den okur, repodaki tek `.env` kökte |
+| `request()` ve `openMarket()` enjekte edilebilir fetch | Ödeme sarmalı tele ancak böyle ulaşıyor |
+
+### DOĞRULANMAYAN — ve bu önemli
+
+**İmzalama turu hiç koşmadı.** Derleniyor, paketleniyor, kod bölmesi çalışıyor,
+imzalayıcı sözleşmesi kütüphanenin kendi tipiyle uyuşuyor, işlem kurulumu
+varsayılanla eşleşiyor. Ama gerçek bir cüzdanın gerçek bir işlemi imzalayıp
+facilitator'ın onu kabul ettiği **görülmedi**.
+
+Üç şey eksik: `VITE_WALLETCONNECT_PROJECT_ID` (reown.com'dan ücretsiz), bir
+tarayıcı cüzdanı (HashPack vb.) ve tarayıcıda deneme. Bunlar gelene kadar bu
+madde "yazıldı" olarak durur, "çalışıyor" olarak değil.
+
+### Kalan iş
+
+projectId girildikten sonra tarayıcıda uçtan uca deneme. README'deki
+"`POST /resolve` gerçek zincirde koşmadı" maddesi duruyor.
+
+### TUZAK: Vite env ikamesi kose parantezle calismiyor
+
+Kullanici cuzdani baglayamadigini soyledi. Iki sebep vardi, ikisi de benim.
+
+**1. Degisken gercek .env'de hic yoktu.** `.env.example`'a ekledim, `.env`'e
+koymayi atladim. Yani doldurulacak satir bile ortada degildi.
+
+**2. `import.meta.env['VITE_...']` yazmistim.** Vite bu degiskenleri build
+aninda duz metin ikamesiyle, **nokta erisimi** uzerinden gomuyor. Kose
+parantezli yazim calisma zamani aramasi olarak kaliyor ve deger `undefined`
+geliyor: kimlik girilse bile buton "unconfigured" der.
+
+Refleksle parantez kullanmisim; oysa `noPropertyAccessFromIndexSignature` bu
+repoda kapali, nokta erisimi bastan beri serbestti.
+
+### Kendi kontrolumu yanlis okudum, duzelttim
+
+Ilk kontrolde bundle'da `VITE_WALLETCONNECT` metnini bulup "calisma zamani
+aramasi kalmis" diye hukum verdim. Bulunan sey kendi tooltip cumlemin iciydi
+("Set VITE_WALLETCONNECT_PROJECT_ID in .env..."), arama degil. Hukum gecersizdi.
+
+Kesin test sentinel ile yapildi: `.env`'e taninabilir bir deger konup build
+alindi, bundle'da arandi, sonra temizlenip yeniden build edildi.
+
+```
+sentinel .env'de   -> bundle'da VAR    = ikame calisiyor
+sentinel silindi   -> bundle'da YOK    = dist temiz
+```
+
+Sahte kimliği `dist`'te birakmadim: birakilsa buton "yapilandirilmis" gorunup
+relay'de anlamsiz bir hatayla duserdi, ki teshisi en zor durum o.
+
+### Kalan
+
+projectId hala girilmedi. Girildiginde web yeniden build edilecek ve tarayicida
+denenecek. O ana kadar cuzdan akisi "yazildi", "calisiyor" degil.
+
+### Yan etki: cuzdan parcasi yalnizca kimlik doluyken uretiliyor
+
+Nokta erisimine gecince Vite degeri build aninda gomuyor. Kimlik bos oldugunda
+`if (!PROJECT_ID) return;` dalinin her zaman alindigi kanitlanabilir hale
+geliyor ve sonrasindaki dinamik `import('./wallet.ts')` **olu kod** olarak
+eleniyor: `dist`'te wallet parcasi hic olusmuyor.
+
+Bu bir hata degil, dogru davranis. Ama sonucu su: cuzdan yolundaki paketleme
+hatalari kimlik girilene kadar GIZLI kalir. Sentinel ile bir kez dolu deger
+verilip build alindi ve parca sorunsuz uretildi:
+
+```
+index-C8DRw56K.js     664.43 kB | gzip: 199.97 kB
+wallet-D-NvGdWh.js  3,417.54 kB | gzip: 730.64 kB
+```
+
+Yani cuzdan yolu build seviyesinde uctan uca dogrulandi; sentinel sonrasi
+`dist` temiz build ile geri alindi.
+
+### Kendi hatam: ANSI kodlari grep filtremi bozdu
+
+Build ciktisini `grep -E "dist/assets"` ile filtreledim; vite ciktisinda renk
+kodlari o metni escape dizileriyle boluyor, grep hicbir sey bulmayinca `&&`
+zinciri kirildi ve ben build'in basarisiz oldugunu sandim. Build basariliydi.
+Bugun ikinci kez bir filtre bana build hakkinda yanlis bilgi verdi.
+
+## ADIM 27 DUZELTMESI — demo sunucusunda soru sormak bedavaydi
+
+### Belirti
+
+Arayuzden cuzdan baglamadan soru sorulabiliyordu ve market aciliyordu. Sebep
+ortada: `pnpm demo` `createApp({ ledger })` cagiriyordu, yani `paymentGate`
+enjekte edilmiyordu. Uc odemeli route'un ucu de aciktı. Bu bastan bilincli bir
+tercihti (sayfalari testnet'e ve facilitator'a bagimli olmadan gelistirmek
+icin) ama urunun kendisini gosterirken yanlis olan sey tam olarak buydu:
+demoda mekanizmanin en gorunur kurali — soru sormak para yatirmaktir —
+calismiyordu.
+
+### Yapilan
+
+`scripts/demo-server.ts` artik `.env`'de treasury varsa **gercek** x402
+kapisini kuruyor: ayni `createPaymentGate`, ayni fiyat fonksiyonu, ayni
+Blocky402 facilitator'i, ayni hesaplanmis depozito. Yani demoda gorulen 402,
+gercek sunucunun gonderdigi 402.
+
+| Karar | Neden |
+| --- | --- |
+| Yalniz `POST /market` kapida | Demonun 20 agent'i uydurma hesap, bakiyeleri yok; bond'u kapiya alsam market hic kosmaz. Gercek sunucuda bond'u da ayni kapi koruyor |
+| Fixture'lar kapiyi atliyor | Dort ornek market sayfalar bos kalmasin diye var. Onlar da odeseydi demo, dolu bir cuzdan ve saglikli bir facilitator olmadan hic acilmazdi |
+| Atlama yontemi: surece ozel rastgele header | `x-demo-fixture`, degeri `randomUUID()`. Hicbir yere yazilmiyor, basilmiyor, surecle birlikte olup gidiyor. Agdan gelen hicbir istek sunamaz |
+| `--free` bayragi duruyor | Sayfa gelistirirken eski davranis hala tek komut uzakta |
+| Treasury yoksa serbest mod | Ama banner bunu bagira bagira soyluyor, sessizce bedavaya dusmuyor |
+
+### Dogrulandi
+
+```
+POST /market  odemesiz   -> HTTP 402, PAYMENT-REQUIRED basliginda 99314719 tinybar, payTo 0.0.10455276
+POST /market  odemeli    -> HTTP 201, mkt-2026-09-12-007
+mirror node              -> 0.0.10407814 -99314719 / 0.0.10455276 +99314719
+demo log                 -> picked up mkt-2026-09-12-007, 9 rapor, kapanis 0.4704
+```
+
+Odeme operator anahtariyla yapildi, tarayici cuzdaniyla degil: amac kapinin
+calistigini kanitlamakti, cuzdan yolunu degil.
+
+### DOGRULANMAYAN
+
+**Tarayici cuzdaniyla odeme hala denenmedi.** `VITE_WALLETCONNECT_PROJECT_ID`
+bos oldugu surece 'Connect wallet' butonu acilmiyor, dolayisiyla UI'dan
+odemeli market acilamiyor. Kimlik girilene kadar bu madde acik kalir.
+
+**Demoda depozito geri donmuyor.** Para gercekten treasury'ye giriyor,
+settlement ise transferleri kaydedip gondermiyor — odenecek agent'lar
+uydurma. Banner bunu iki satirla soyluyor ve README'ye de limit olarak
+eklendi. Paranin geri dondugu kosu `pnpm api` + `pnpm agents`.
+
+### Yan duzeltme: .env.example yanlis LLM anahtarini istiyordu
+
+`.env.example` `ANTHROPIC_API_KEY` yaziyordu, kod ise `OPENAI_API_KEY`
+okuyor (`scripts/agent-fleet.ts`, `scripts/demo-scenarios.ts`). Repoyu
+klonlayan biri dolduracak satiri bulamazdi. Degistirildi, `OPENAI_MODEL` de
+eklendi, PLAN'in claude-sonnet-5 dedigi yorumda duruyor.
+
+## ADIM 16/15 DUZELTMESI — odenmeyen bond havuza giriyordu
+
+### Nasil ortaya cikti
+
+Kullanici "son halini kendin test et" dedi. Iki kosu yapildi:
+
+```
+check:resolve (20 gercek agent, gercek model, gercek Graph)   HEPSI GECTI
+check:orchestrator --external-agents (zincir uzerinde)        1 KONTROL DUSTU
+```
+
+Dusen kontrol:
+
+```
+[FAIL] The treasury is square    delta -2.00000000 HBAR
+```
+
+Tam 2 HBAR. Mirror node'dan sayildi:
+
+```
+hazineye giren : 18 x 1 HBAR bond + 0.99314719 deposit
+hazineden cikan: 20 bond iadesi + flat fee + asker iadesi
+odeyen hesaplar: 19 (1 operator + 18 agent)
+odemeyenler    : agent-01, agent-15
+```
+
+agent-15'in bakiyesi tam 11.0000 HBAR: bond odemeden bond iadesi almis.
+
+### Sebep
+
+`@x402/express` odemeli bir route'u su sirayla kosuyor:
+
+```
+verify -> HANDLER -> yaniti tampona al -> settle -> birak veya 402
+```
+
+Handler para tasinmadan ONCE kosuyor. Settle patlayinca kutuphane tamponu
+atip 402 donuyor, ama handler'in yazdigini kimse geri almiyor. Iki agent
+havuza parasiz girdi, settlement ikisine de teminat iadesi odedi.
+
+Handler 4xx donerse sorun yok: kutuphane o durumda odemeyi iptal ediyor
+(`reason: handler_failed`), settle etmiyor. Tek acik "handler basarili +
+settle basarisiz" hali.
+
+Ikinci katman `check-orchestrator`'in kendi mantigiydi: `alreadyDone` sunucu
+state'ini odemenin kaniti sayiyordu. Sunucu state'i odemenin kaniti degil —
+en azindan bu duzeltmeden once degildi.
+
+### Reddedilen cozum: `upfront` akisi
+
+Hedera exact semasi `paymentFlows: { default: { supported: ['authorization',
+'upfront'] } }` diyor, yani `extra: { paymentFlow: 'upfront' }` ile para
+handler'dan once tasinabilir. Tek satir, ama hatayi aynasiyla degistiriyor:
+odeme alinir, handler patlar, state olmaz. Kapali devre iddiasi acisindan
+"fonlanmamis katilimci marketin icinde" hatasi, "hazinede sahipsiz para"dan
+daha kotu ve operatorun goremedigi tek olan o. Sira aynen kaldi, etki
+kosullu hale getirildi.
+
+### Yapilan
+
+| Dosya | Degisiklik |
+| --- | --- |
+| `apps/api/src/payment-rollback.ts` | yeni. Handler etkisini kaydeder, yanit 402 ise geri alir |
+| `apps/api/src/payment.ts` | kapiyi `withPaymentRollback` ile sariyor, varsayilan raporlayici konsola uyari basiyor |
+| `apps/api/src/app.ts` | `/market`, `/market/:id/bond` ve `/resolve` etkilerini kaydediyor |
+| `packages/core/src/market.ts` | `removeBondedAgent`, yalniz bonding asamasinda |
+| `apps/api/src/store.ts` | `remove(id)` ve monoton `issued` sayaci |
+
+**Geri alma yanit gonderilmeden ONCE kosuyor.** `res.on('finish')` ile
+yapmak dogru gorunuyor ve bir yaris kaybediyor: 402'yi okuyup hemen tekrar
+deneyen istemci, eski bond hala kayitliyken `409 Already bonded` alir ve
+bunu "demek ki odemisim" diye okur — ayni fonlanmamis agent, baska kapidan.
+O yuzden `res.end` sariliyor, geri alma tek bayt yazilmadan once bitiyor.
+`finish` dinleyicisi yalnizca yedek olarak duruyor.
+
+`close` bilincli olarak kullanilmadi: baglantiyi koparan istemci odemenin
+yerlesip yerlesmedigi hakkinda bir sey soylemiyor, odenmis bir bond'u
+laptop kapandi diye geri almak duzeltilen hatadan daha kotu.
+
+### Geri alinamayan sey
+
+HCS geri alinamiyor. Deposit'i yerlesmeyen bir market, topic'inde tek bir
+`market-open` mesajiyla kaliyor ve arkasi gelmiyor. Bu durum durust: topic'e
+baskasi yazamaz ve okuyan kisi marketin hic kosmadigini gorur. Odenmemis bir
+odemeyi anlatmak icin yeni bir mesaj tipi uydurmaktan ucuz.
+
+Market id'leri artik `markets.size` yerine `markets.issued` uzerinden
+uretiliyor; aksi halde geri alinan marketin numarasi bir sonrakine gecer ve
+iki topic tek id altinda gorunurdu.
+
+### Dogrulandi
+
+```
+8 yeni birim testi (apps/api/test/payment-rollback.test.ts)
+  - deposit yerlesmezse market store'da kalmiyor
+  - geri alinan market numarasini bir sonrakine devretmiyor
+  - bond yerlesmezse agent havuzda kalmiyor
+  - geri alinan agent odemesi yerlestiginde tekrar girebiliyor
+  - odemesi yerlesen agent'larin bond'u duruyor
+  - geri alma yaniti gondermeden once kosuyor  (['rolled-back','response-sent'])
+  - odemesiz istekte geri alinacak bir sey yok
+4 yeni core testi (removeBondedAgent)
+toplam 712 -> 724, hepsi geciyor
+```
+
+Zincir uzerinde tekrar kosuldu:
+
+```
+[PASS] The treasury is square    delta 0.00000000 HBAR
+topic 0.0.10503676, 2 rapor, 3 transfer, 8 mesaj
+```
+
+Dikkat: bu kosuda settle hic patlamadi, yani zincir kosusu **mutlu yolu**
+dogruladi, geri alma yolunu degil. Geri alma yolu birim testleriyle
+kanitlaniyor; ikisini karistirmamak lazim.
+
+### Kalan risk
+
+Settle'in NEDEN iki agent'ta patladigi hala bilinmiyor. 402'nin govdesi bos
+geliyor, kutuphane sebebi disari vermiyor. Frekans olcusu: o kosuda 20'de 2.
+Simdi en azindan bedeli yok — para gelmediyse agent havuza girmiyor ve
+istemci tekrar deniyor.
+
+## URUNUN SON HALI — market kendi kendine kosuyor, agent kendi bond'unu oduyor
+
+Kullanici "gercek agentlarin okuyup cevap urettigi surume gecelim" dedi.
+Uc parca eksikti ve ucu de "demo var, urun yok" farkiydi.
+
+### Eksik 1 — hicbir sey marketi kosturmuyordu
+
+`createApp` route'lari cevapliyor, `Orchestrator` bir marketi suruyor, ama
+ikisini baglayan yoktu: gercek sunucuda `POST /market` ile acilan market
+sonsuza kadar `bonding`'de kaliyordu. Simdiye kadar her kosuda basinda bir
+script durup `closeBonding`, `runMarket` ve `settle` cagiriyordu. Demo
+sunucusunda pickup dongusu vardi, urunde yoktu.
+
+`apps/api/src/runner.ts` o dongu. Kurallari:
+
+| Durum | Davranis |
+| --- | --- |
+| havuz doldu | hemen kapat ve kos, pencerenin kalanini bekleme |
+| pencere doldu, havuz eksik | market iptal, deposit ve bond'lar iade |
+| asker hesabi yok | market kosar, settlement YAPILMAZ, para hazinede bekler |
+| kosarken hata | market oldugu yerde birakilir, tekrar denenmez |
+
+Ucuncusu bilincli: tahmin edilen bir hesaba iade gondermek, parayi hazinede
+birakmaktan kotu. Dorduncusu de: yarim kosmus marketi tekrar kosturmak
+agent'lari ikinci kez ceker.
+
+Iptal edilen market icin `buildRefundPlan` yazildi. `buildTransferPlan`'dan
+ayri: o ödeme hesaplar, bu hesaplamayi reddeder. Ikisini tek fonksiyona
+sokmak, mekanizmanin reddettigi bir havuzda birinin skorlanmasina giden yol.
+
+### Eksik 2 — agent'lar kendi bond'unu odemiyordu
+
+Simdiye kadar bond'u hep 20 anahtari birden tutan bir gate script'i odedi.
+Route'un calistigini kanitliyor, urunu uretmiyor: ucuncu tarafin agent'i bunu
+kendi anahtariyla yapabilmeli.
+
+`apps/agent/src/bonding.ts`: agent API'yi izler, `decideToBond` ile karar
+verir, kendi Hedera anahtariyla x402 uzerinden oder. Tavan var
+(`AGENT_MAX_BOND_TINYBAR`, varsayilan 5 HBAR), cunku sarilmis fetch 402 ne
+isterse oder ve bond fiyatini market aciyor. Market basina tek deneme:
+yerlesmis olabilecek bir odemeyi tekrar denemek iki kez odemektir.
+
+### Eksik 3 — gercek sunucu arayuzu servis etmiyordu
+
+`apps/web/src/lib/api.ts` bastan beri "uretimde Express bu bundle'i servis
+eder" diyordu, `server.ts` etmiyordu. Simdi ediyor: sayfalar ve odemeli API
+ayni origin'de, cuzdan sayfanin geldigi host'a odeme yapiyor.
+
+### Asker hesabi nereden geliyor
+
+Handler odeyeni goremiyor: x402 kapisi handler'dan SONRA settle ediyor, odeyen
+hesap ancak makbuzda beliriyor. Cozum: tarayici `askerAccountId` beyan ediyor,
+bagli cuzdanin hesabi. Yalan soyleyenin yapabilecegi tek sey kendi iadesini
+baska yere gondermek, o da tam depozito odedikten sonra. Beyan yoksa market
+yine kosuyor, settlement yapilmiyor.
+
+### TUZAK: donmus islem 120 saniyede oluyor, market onunla birlikte
+
+Ilk canli kosuda tam bunu yedik:
+
+```
+[agent-drawn] agent-11 position 1
+[runner-failed] transaction 0.0.10407814@1789228646.651958330
+                failed precheck with status TRANSACTION_EXPIRED
+```
+
+`submitMessage` ve `createMarketTopic` islemi `withRetry`'in DISINDA bir kez
+donduruyordu. Donmus islem sabit bir `validStart` tasiyor ve Hedera 120
+saniyeden eskisini reddediyor. Pencere kapandiginda her deneme ayni cevabi
+aliyor: TRANSACTION_EXPIRED, sonsuza kadar. Bir rapor yazilamayinca market
+oldu, 20 bond ve deposit hazinede kaldi.
+
+Donduran satiri retry'in icine almak gerekiyordu, ama dikkatli: sabit islem
+kimligi bilerek oradaydi, cunku ilk deneme yerlesmisse ikincisi
+DUPLICATE_TRANSACTION alir ve para iki kez gitmez.
+
+Ayrim su: **suresi dolmus islem asla konsensusa ulasmamistir.** Sure
+`validStart`'a gore her node'da ayni sekilde hesaplaniyor, yani dolmus islem
+sonradan da gecemez. Dolayisiyla yalniz TRANSACTION_EXPIRED'de yeniden
+kurmak guvenli; BUSY veya kopan baglantida donmus kimlik korunuyor.
+
+`withFreshTransaction` bunu yapiyor, `isExpiredTransaction` durumu tanıyor,
+gecerlilik suresi de 180 saniyeye (Hedera'nin izin verdigi azami) cikarildi.
+TRANSACTION_EXPIRED bilincli olarak transient listesine EKLENMEDI: ayni
+baytlari tekrar gondermek ise yaramaz, yeni kimlik gerekiyor.
+
+### Dogrulandi — gercek zincirde, gercek agent'larla
+
+```
+market  mkt-2026-09-12-001  topic 0.0.10504951
+  20 agent kendi bond'unu x402 ile odedi
+  3 rapor: agent-12 0.1839 -> agent-19 0.1882 -> agent-18 0.3786 CLOSE
+  kapanis stopping-rule, referans terminal agent
+  settlement 21 satir, 3 transfer
+HCS  9 mesaj: market-open, 3 report, market-close, settlement, 3 chunk
+hazine  giren 2099314719 = cikan 2099314719, delta 0
+```
+
+Testler 723 -> 744.
+
+### Askida kalan para
+
+TRANSACTION_EXPIRED ile olen ilk market (topic 0.0.10504683) 20 bond ve bir
+deposit'i hazinede birakti: 2099314719 tinybar. Sunucu bellek ici store ile
+calistigi icin yeniden baslatmayla market kaydi da gitti. Iade el ile
+yapilacak; hepsi ayni sahibin hesaplari arasinda ama defter kapanmadan
+kapanmis sayilmaz.
