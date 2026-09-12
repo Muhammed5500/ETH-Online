@@ -13,8 +13,17 @@
  * cannot time out the way a real one does — so the timeout path, which is the
  * one that slashes bonds, would never be exercised by the thing we ship.
  *
+ * EACH AGENT PAYS ITS OWN BOND. The fleet watches the API for markets in
+ * `bonding`, asks each agent whether it wants in, and pays with that agent's
+ * own Hedera key over x402. Every earlier run had a gate script holding all
+ * twenty keys and bonding on everyone's behalf, which proves the route works
+ * and is not the product: a third party's agent has to be able to do this with
+ * a key nobody here has. `--no-bond` turns it off for a run that only wants
+ * the report side.
+ *
  * Run:  pnpm agents                    twenty agents, real model, real Graph
  *       pnpm agents --offline          a stub model, no OpenAI key needed
+ *       pnpm agents --no-bond          listen and report, never join a market
  *       pnpm agents --count 5          a smaller pool
  *       pnpm agents --liar agent-04    stage scenario 2
  *       pnpm agents --lazy all         stage scenario 3 (Theorem 7)
@@ -23,10 +32,19 @@ import './load-env.js';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Server } from 'node:http';
+import { wrapFetchWithPayment, x402Client } from '@x402/fetch';
+import {
+  createClientHederaSigner,
+  ExactHederaScheme,
+  HBAR_ASSET_ID,
+  HEDERA_TESTNET_CAIP2,
+  PrivateKey,
+} from '@x402/hedera';
 import { createGatewayFromEnv, questionTargetsFromEnv, readEnv } from '@ethonline/graph';
 import { parseAccountsFile } from '@ethonline/hedera';
 import {
   Agent,
+  BondingWatcher,
   buildAgentPool,
   createAgentServer,
   openAiLlm,
@@ -42,6 +60,37 @@ const API_URL = process.env['API_URL'] ?? 'http://127.0.0.1:4021';
 function flagValue(name: string): string | undefined {
   const i = process.argv.indexOf(name);
   return i === -1 ? undefined : process.argv[i + 1];
+}
+
+/**
+ * The most one agent will ever pay for a single bond, in tinybar.
+ *
+ * A wrapped fetch pays whatever the 402 asks for, and the bond price is set by
+ * whoever opened the market. A default market's bond is 1 HBAR; five leaves
+ * room for unusual parameters and refuses anything that looks like a drain.
+ */
+const MAX_BOND_TINYBAR = BigInt(readEnv(process.env, 'AGENT_MAX_BOND_TINYBAR') ?? '500000000');
+
+/** A fetch that answers a 402 by paying it, with this agent's own key. */
+function payingFetch(accountId: string, privateKey: string) {
+  const signer = createClientHederaSigner(accountId, PrivateKey.fromStringECDSA(privateKey), {
+    network: HEDERA_TESTNET_CAIP2,
+  });
+  const client = x402Client.fromConfig({
+    schemes: [{ network: HEDERA_TESTNET_CAIP2, client: new ExactHederaScheme(signer) }],
+    // SPIKE A trap: HBAR is not a "default asset", so without this every
+    // payment is refused client-side before it is ever attempted.
+    spendControls: {
+      allowedAssets: [
+        {
+          network: HEDERA_TESTNET_CAIP2,
+          asset: HBAR_ASSET_ID,
+          maxAmountPerPayment: MAX_BOND_TINYBAR.toString(),
+        },
+      ],
+    },
+  });
+  return wrapFetchWithPayment(fetch, client);
 }
 
 /**
@@ -69,6 +118,7 @@ function offlineLlm(agentId: string): LlmClient {
 
 async function main(): Promise<void> {
   const offline = process.argv.includes('--offline');
+  const bonding = !process.argv.includes('--no-bond');
   const count = Number(flagValue('--count') ?? 20);
   const liar = flagValue('--liar');
   const lazy = flagValue('--lazy');
@@ -120,6 +170,7 @@ async function main(): Promise<void> {
   const model = readEnv(process.env, 'OPENAI_MODEL');
 
   const servers: Server[] = [];
+  const watchers: BondingWatcher[] = [];
   const rows: string[] = [];
 
   for (const [i, config] of pool.entries()) {
@@ -189,6 +240,23 @@ async function main(): Promise<void> {
       status = 'listening, API unreachable';
     }
 
+    // Each agent watches for markets and pays its own way in. Started only
+    // after registration, because the orchestrator reaches an agent at the
+    // endpoint it registered — bonding into a market this agent cannot then
+    // be asked for a report would cost it the bond for nothing.
+    if (bonding) {
+      const watcher = new BondingWatcher({
+        agent,
+        agentId: config.id,
+        apiUrl: API_URL,
+        payingFetch: payingFetch(config.accountId, config.privateKey),
+        maxBondTinybar: MAX_BOND_TINYBAR,
+        onEvent: (event, detail) => console.log(`  [${event}]`, JSON.stringify(detail)),
+      });
+      watcher.start(Number(readEnv(process.env, 'AGENT_BOND_POLL_MS') ?? 4000));
+      watchers.push(watcher);
+    }
+
     rows.push(
       `  ${config.id}  :${port}  ${(config.behavior ?? 'honest').padEnd(6)} ` +
         `${status.padEnd(26)} ${config.sliceIds.join('+')}`,
@@ -200,6 +268,9 @@ async function main(): Promise<void> {
   console.log(`  API        ${API_URL}`);
   console.log(`  Model      ${offline ? 'offline stub' : `openai:${model ?? 'default'}`}`);
   console.log(`  Evidence   ${gateway ? 'The Graph gateway' : 'none (offline)'}`);
+  console.log(
+    `  Bonding    ${bonding ? `each agent pays its own, up to ${MAX_BOND_TINYBAR} tinybar` : 'off (--no-bond)'}`,
+  );
   console.log(`  Subject    ${subjectId ?? 'NOT SET'}`);
   console.log('='.repeat(74));
   for (const row of rows) console.log(row);
@@ -207,6 +278,7 @@ async function main(): Promise<void> {
   console.log(`  ${pool.length} agents listening. Ctrl-C to stop.\n`);
 
   const shutdown = (): void => {
+    for (const w of watchers) w.stop();
     for (const s of servers) s.close();
     process.exit(0);
   };

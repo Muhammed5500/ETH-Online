@@ -28,7 +28,7 @@ import {
   TopicMessageSubmitTransaction,
   type Client,
 } from '@hashgraph/sdk';
-import { withRetry, type RetryOptions } from './retry.js';
+import { withFreshTransaction, withRetry, type RetryOptions } from './retry.js';
 import {
   assertFitsSingleMessage,
   encodeHcsMessage,
@@ -65,11 +65,15 @@ export async function createMarketTopic(
     tx.setSubmitKey(PrivateKey.fromStringECDSA(opts.submitKey).publicKey);
   }
 
-  const frozen = tx.freezeWith(client);
-  const { receipt, transactionId } = await withRetry(async () => {
-    const response = await frozen.execute(client);
-    return { receipt: await response.getReceipt(client), transactionId: response.transactionId };
-  }, opts.retry);
+  // Frozen inside, so an expired attempt is rebuilt with a fresh id rather
+  // than retried into the ground. See retry.ts for why that is safe.
+  const { receipt, transactionId } = await withFreshTransaction(async () => {
+    const frozen = tx.freezeWith(client);
+    return withRetry(async () => {
+      const response = await frozen.execute(client);
+      return { receipt: await response.getReceipt(client), transactionId: response.transactionId };
+    }, opts.retry);
+  });
 
   const topicId = receipt.topicId;
   if (!topicId) {
@@ -77,6 +81,15 @@ export async function createMarketTopic(
   }
   return { topicId: topicId.toString(), transactionId: transactionId.toString() };
 }
+
+/**
+ * How long a transaction stays valid, in seconds.
+ *
+ * 180 is Hedera's maximum. The default is 120, which sounds generous until a
+ * gRPC connection stalls: the SDK keeps retrying the same frozen bytes, and
+ * when the window closes the transaction is dead for good.
+ */
+export const TRANSACTION_VALID_DURATION_SECONDS = 180;
 
 export interface SubmitResult {
   readonly sequenceNumber: number;
@@ -118,11 +131,19 @@ export async function submitMessage(
     .setMessage(encoded)
     .setMaxChunks(1);
 
-  const frozen = tx.freezeWith(client);
-  const { record, transactionId } = await withRetry(async () => {
-    const response = await frozen.execute(client);
-    return { record: await response.getRecord(client), transactionId: response.transactionId };
-  }, opts.retry);
+  // A market dies if a report cannot be written, and on 2026-09-12 one did:
+  // the frozen transaction outlived its 120-second window while the round was
+  // in flight and every retry answered TRANSACTION_EXPIRED. Freezing per
+  // attempt fixes that; the duration below buys room before it matters.
+  tx.setTransactionValidDuration(TRANSACTION_VALID_DURATION_SECONDS);
+
+  const { record, transactionId } = await withFreshTransaction(async () => {
+    const frozen = tx.freezeWith(client);
+    return withRetry(async () => {
+      const response = await frozen.execute(client);
+      return { record: await response.getRecord(client), transactionId: response.transactionId };
+    }, opts.retry);
+  });
 
   const { receipt } = record;
   const sequenceNumber = receipt.topicSequenceNumber;

@@ -16,7 +16,9 @@ export {
 export { createHederaClient } from './client.js';
 
 export {
+  isExpiredTransaction,
   isTransientHederaError,
+  withFreshTransaction,
   withRetry,
   type RetryOptions,
 } from './retry.js';

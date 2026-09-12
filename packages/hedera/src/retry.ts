@@ -18,6 +18,19 @@
  *      retry comes back DUPLICATE_TRANSACTION instead of transferring again.
  *      That is what makes a retry safe rather than merely convenient.
  *
+ * THE ONE EXCEPTION, AND WHY IT IS SAFE. Rule 2 has a failure mode of its own:
+ * a frozen transaction id fixes `validStart`, and Hedera refuses anything
+ * older than its valid duration. Once that window passes, every retry of that
+ * transaction fails with TRANSACTION_EXPIRED forever — which is exactly what
+ * killed a live market on 2026-09-12, one report into a twenty-agent run.
+ *
+ * An expired transaction is the one case where rebuilding is provably safe:
+ * expiry is judged against `validStart`, identically at every node, so a
+ * transaction that expired never reached consensus and never will. It cannot
+ * have taken effect, so a fresh id cannot duplicate it. `isExpiredTransaction`
+ * marks that case, and the callers that can rebuild do so exactly once per
+ * attempt rather than hammering a corpse.
+ *
  * This module deliberately imports nothing from `@hashgraph/sdk`. The SDK is
  * heavy to load and `pnpm test` has to stay in the seconds, so the policy
  * lives apart from the client that uses it and stays unit-testable on its own.
@@ -47,6 +60,46 @@ const TRANSIENT_PATTERNS: readonly RegExp[] = [
   /max attempts.*exceeded/i,
   /GRPC/i,
 ];
+
+/**
+ * The transaction's valid window closed before a node accepted it.
+ *
+ * Distinct from the transient statuses above because the remedy is different:
+ * these need a NEW transaction id, and retrying the same frozen bytes is
+ * guaranteed to fail. See the note at the top for why rebuilding is safe here
+ * and nowhere else.
+ */
+export function isExpiredTransaction(err: unknown): boolean {
+  const status = (err as { status?: { toString(): string } })?.status;
+  if (status && status.toString() === 'TRANSACTION_EXPIRED') return true;
+  return /TRANSACTION_EXPIRED/i.test((err as Error)?.message ?? '');
+}
+
+/**
+ * Runs an operation that builds and executes a transaction, rebuilding it if
+ * it expires.
+ *
+ * `build` is called once per outer attempt and must freeze a fresh
+ * transaction; retries WITHIN one attempt reuse it, so ordinary transient
+ * failures keep the duplicate protection that rule 2 buys.
+ */
+export async function withFreshTransaction<T>(
+  build: () => Promise<T>,
+  opts: { readonly rebuilds?: number; readonly onRebuild?: (attempt: number, err: unknown) => void } = {},
+): Promise<T> {
+  const rebuilds = opts.rebuilds ?? 2;
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= rebuilds + 1; attempt++) {
+    try {
+      return await build();
+    } catch (err) {
+      lastError = err;
+      if (attempt > rebuilds || !isExpiredTransaction(err)) throw err;
+      opts.onRebuild?.(attempt, err);
+    }
+  }
+  throw lastError;
+}
 
 /**
  * Whether a failure is worth another attempt.

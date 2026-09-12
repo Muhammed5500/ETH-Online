@@ -73,6 +73,20 @@ export interface StoredMarket {
   readonly rng: HcsRandomSource;
   readonly depositTinybar: bigint;
   readonly bondTinybar: bigint;
+  /**
+   * Where the asker's refund goes.
+   *
+   * Declared by the caller when the market is opened, because the handler
+   * cannot see who paid: the x402 gate settles after the handler returns, and
+   * the payer's account only appears in the settlement receipt afterwards.
+   *
+   * Declaring it is not a hole worth closing with cryptography. The only thing
+   * a liar can do is send their OWN refund somewhere else, and they have to
+   * pay a full deposit for the privilege. Absent it, the market still runs and
+   * settlement simply has nowhere to return the unspent deposit, which the
+   * runner refuses to do silently.
+   */
+  readonly askerAccountId?: string;
   readonly createdAt: number;
   readonly bondingClosesAt: number;
   readonly bonds: Map<string, BondRecord>;
@@ -135,17 +149,41 @@ export class AgentRegistry {
 
 export class MarketStore {
   private readonly markets = new Map<string, StoredMarket>();
+  /**
+   * How many markets have ever been added, including removed ones.
+   *
+   * Ids are numbered from this rather than from `size` so a market that was
+   * rolled back does not hand its number to the next one. Two topics sharing
+   * an id would be indistinguishable in an HCS memo, and the second would be
+   * refused by `add` if the first were still here — a bug that only appears
+   * once a rollback has happened.
+   */
+  private issuedCount = 0;
 
   add(market: StoredMarket): StoredMarket {
     if (this.markets.has(market.id)) {
       throw new Error(`Market ${market.id} already exists.`);
     }
     this.markets.set(market.id, market);
+    this.issuedCount++;
     return market;
   }
 
   get(id: string): StoredMarket | undefined {
     return this.markets.get(id);
+  }
+
+  /**
+   * Drops a market that should never have existed.
+   *
+   * The one caller is the payment rollback: a market whose deposit did not
+   * settle was opened by a handler that ran too early, and leaving it in the
+   * store would let agents bond into a market nobody funded. Its HCS topic
+   * stays behind with a lone `market-open` message, which is the honest
+   * record of what happened.
+   */
+  remove(id: string): boolean {
+    return this.markets.delete(id);
   }
 
   list(): StoredMarket[] {
@@ -154,6 +192,11 @@ export class MarketStore {
 
   get size(): number {
     return this.markets.size;
+  }
+
+  /** Markets ever added. Never goes down; see `issuedCount`. */
+  get issued(): number {
+    return this.issuedCount;
   }
 }
 

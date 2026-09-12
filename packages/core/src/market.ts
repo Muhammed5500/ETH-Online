@@ -88,6 +88,34 @@ export class Market {
   }
 
   /**
+   * Teminat kaydını geri alır — ödeme yerleşmediyse.
+   *
+   * NEDEN VAR. x402 katmanı handler'ı ödemeden ÖNCE çalıştırıyor: doğrula ->
+   * handler -> settle. Settle patladığında istemci 402 alıyor ama handler'ın
+   * yazdığı teminat kaydı yerinde kalıyor. O agent havuza parasız girmiş olur
+   * ve settlement ona teminat iadesi öder — hazine tam bir bond kadar açık
+   * verir. 2026-09-12'de zincir üstünde iki agent'ta gerçekleşti, fark tam
+   * 2 HBAR (docs/step-log.md).
+   *
+   * Yalnızca bonding aşamasında geçerli. Market koşmaya başladıysa agent
+   * çekilmiş olabilir ve kaydı silmek, mekanizmanın kim katıldı kaydını
+   * bozar; o durumda geri alma değil, insan müdahalesi gerekir.
+   */
+  removeBondedAgent(agentId: string): void {
+    if (this.state.status !== 'bonding') {
+      throw new Error(
+        `Teminat kaydı sadece bonding aşamasında geri alınabilir (şu an: ${this.state.status}). ` +
+          `Market başladıktan sonra agent listesinden kimse silinemez.`,
+      );
+    }
+    const i = this.state.bondedAgents.indexOf(agentId);
+    if (i === -1) {
+      throw new Error(`Agent ${agentId} bu markette teminat yatırmamış, geri alınacak kayıt yok.`);
+    }
+    this.state.bondedAgents.splice(i, 1);
+  }
+
+  /**
    * Bonding window'unu kapatır.
    *
    * `N < minPoolSize` ise market hiç başlamaz: `cancelled`, herkese tam iade.

@@ -46,3 +46,11 @@ export {
   type AgentServer,
   type AgentServerDeps,
 } from './server.js';
+
+export {
+  BondingWatcher,
+  type BondOutcome,
+  type BondingWatcherDeps,
+  type FetchLike,
+  type MarketSummary,
+} from './bonding.js';

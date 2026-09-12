@@ -6,7 +6,7 @@
  * pays twice, so an unrecognised error has to be treated as permanent.
  */
 import { describe, expect, it, vi } from 'vitest';
-import { isTransientHederaError, withRetry } from '../src/retry.js';
+import { isExpiredTransaction, isTransientHederaError, withFreshTransaction, withRetry } from '../src/retry.js';
 
 /** Mimics the SDK's StatusError shape: an error carrying a `status`. */
 function statusError(status: string): Error {
@@ -116,5 +116,60 @@ describe('withRetry', () => {
 
   it('rejects a nonsense attempt budget', async () => {
     await expect(withRetry(async () => 1, { attempts: 0 })).rejects.toThrow(/attempts/);
+  });
+});
+
+describe('expired transactions', () => {
+  it('recognises the status and the message form', () => {
+    expect(isExpiredTransaction({ status: { toString: () => 'TRANSACTION_EXPIRED' } })).toBe(true);
+    expect(
+      isExpiredTransaction(
+        new Error('transaction 0.0.1@1.2 failed precheck with status TRANSACTION_EXPIRED'),
+      ),
+    ).toBe(true);
+    expect(isExpiredTransaction(new Error('INSUFFICIENT_PAYER_BALANCE'))).toBe(false);
+  });
+
+  it('is NOT treated as an ordinary transient error', () => {
+    // Retrying the same frozen bytes after expiry fails forever. It needs a
+    // new transaction id, which only the caller can build.
+    expect(isTransientHederaError({ status: { toString: () => 'TRANSACTION_EXPIRED' } })).toBe(false);
+  });
+
+  it('rebuilds once and succeeds', async () => {
+    let built = 0;
+    const result = await withFreshTransaction(async () => {
+      built++;
+      if (built === 1) throw new Error('failed precheck with status TRANSACTION_EXPIRED');
+      return 'written';
+    });
+    expect(result).toBe('written');
+    expect(built).toBe(2);
+  });
+
+  it('gives up after the rebuild budget', async () => {
+    let built = 0;
+    await expect(
+      withFreshTransaction(
+        async () => {
+          built++;
+          throw new Error('TRANSACTION_EXPIRED');
+        },
+        { rebuilds: 2 },
+      ),
+    ).rejects.toThrow(/TRANSACTION_EXPIRED/);
+    expect(built).toBe(3);
+  });
+
+  it('does not rebuild anything else', async () => {
+    let built = 0;
+    await expect(
+      withFreshTransaction(async () => {
+        built++;
+        throw new Error('INVALID_SIGNATURE');
+      }),
+    ).rejects.toThrow(/INVALID_SIGNATURE/);
+    // A bad signature will be bad again. Rebuilding it just burns fees.
+    expect(built).toBe(1);
   });
 });

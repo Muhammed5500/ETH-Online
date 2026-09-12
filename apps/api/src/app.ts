@@ -46,6 +46,8 @@ import type { Ledger } from './ledger.js';
 import { bondTinybar, depositTinybar, DEFAULT_HBAR_PER_UNIT, unitsToTinybar } from './pricing.js';
 import { summarize } from './settlement-progress.js';
 import { verifyReportSignature } from './signatures.js';
+import { onPaymentFailure } from './payment-rollback.js';
+import { agentRecords, recordFor } from './reputation.js';
 import {
   buildResolveAnswer,
   findAnsweredMarket,
@@ -102,6 +104,13 @@ function asRecord(v: unknown): Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v)
     ? (v as Record<string, unknown>)
     : {};
+}
+
+/** `0.0.1234`. Rejects anything else so a typo cannot swallow a refund. */
+export function parseAccountId(v: unknown): string | undefined {
+  if (typeof v !== 'string') return undefined;
+  const trimmed = v.trim();
+  return /^\d+\.\d+\.\d+$/.test(trimmed) ? trimmed : undefined;
 }
 
 function requireString(v: unknown, name: string): string {
@@ -230,7 +239,14 @@ export function createApp(deps: AppDeps): Api {
   });
 
   app.get('/agents', (_req, res) => {
-    res.json({ agents: registry.list(), count: registry.size });
+    // Identity and record in one response. The directory needs both, and two
+    // endpoints would mean the page renders an agent whose record arrives a
+    // moment later — a card that changes under the reader for no reason.
+    const records = agentRecords(markets);
+    res.json({
+      agents: registry.list().map((a) => ({ ...a, record: recordFor(records, a.agentId) })),
+      count: registry.size,
+    });
   });
 
   // --------------------------------------------------------- open a market
@@ -253,7 +269,9 @@ export function createApp(deps: AppDeps): Api {
         return fail(res, 400, 'Invalid market request', (e as Error).message);
       }
 
-      const id = nextMarketId(markets.size, new Date(now()));
+      // `issued`, not `size`: a market rolled back for an unsettled deposit
+      // must not lend its number to the next one.
+      const id = nextMarketId(markets.issued, new Date(now()));
       const deposit = depositTinybar(params, prior, config.hbarPerUnit);
       const bond = bondTinybar(params, config.hbarPerUnit);
 
@@ -293,10 +311,23 @@ export function createApp(deps: AppDeps): Api {
           rng,
           depositTinybar: deposit,
           bondTinybar: bond,
+          // Optional: a market opened without one still runs, and settlement
+          // then has nowhere to send the refund. See StoredMarket.
+          ...(parseAccountId(body['askerAccountId'])
+            ? { askerAccountId: parseAccountId(body['askerAccountId'])! }
+            : {}),
           createdAt: now(),
           bondingClosesAt: now() + config.bondingWindowMs,
           bonds: new Map(),
           annotations: new Map(),
+        });
+
+        // The deposit has NOT been paid yet at this point: the x402 gate
+        // settles after this handler returns. If that settlement fails the
+        // market must not survive, or agents would bond into a market nobody
+        // funded. See payment-rollback.ts.
+        onPaymentFailure(res, `market ${stored.id} (deposit never settled)`, () => {
+          markets.remove(stored.id);
         });
 
         return void res.status(201).json({
@@ -356,6 +387,14 @@ export function createApp(deps: AppDeps): Api {
       accountId: agent.accountId,
       paidTinybar: stored.bondTinybar,
       bondedAt: now(),
+    });
+
+    // Same as above, and this is the one that actually bit: a bond recorded
+    // against a payment that never settled puts an unfunded agent in the pool
+    // and settlement pays its bond back out of the treasury.
+    onPaymentFailure(res, `bond for ${agentId} on ${stored.id} (never settled)`, () => {
+      stored.bonds.delete(agentId);
+      stored.market.removeBondedAgent(agentId);
     });
 
     return void res.status(201).json({
@@ -778,7 +817,7 @@ export function createApp(deps: AppDeps): Api {
         const prior = resolvePrior(body['prior']);
         assertValidParams(params);
 
-        const id = nextMarketId(markets.size, new Date(now()));
+        const id = nextMarketId(markets.issued, new Date(now()));
         const topicId = await deps.ledger.createTopic(`ethonline market ${id}`);
         const openMessage: HcsMessage = {
           v: 1,
@@ -810,10 +849,17 @@ export function createApp(deps: AppDeps): Api {
           rng,
           depositTinybar: depositTinybar(params, prior, config.hbarPerUnit),
           bondTinybar: bondTinybar(params, config.hbarPerUnit),
+          ...(parseAccountId(body['askerAccountId'])
+            ? { askerAccountId: parseAccountId(body['askerAccountId'])! }
+            : {}),
           createdAt: now(),
           bondingClosesAt: now() + config.bondingWindowMs,
           bonds: new Map(),
           annotations: new Map(),
+        });
+
+        onPaymentFailure(res, `market ${stored.id} opened by /resolve (unpaid)`, () => {
+          markets.remove(stored.id);
         });
 
         return void res.status(202).json({

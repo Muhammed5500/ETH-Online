@@ -219,6 +219,13 @@ async function main(): Promise<void> {
         {
           // Server state decides, not the payment result: if the bond is
           // already recorded, a lost response had settled after all.
+          //
+          // This is only sound because a bond recorded against a payment that
+          // did not settle is now rolled back before the 402 goes out
+          // (apps/api/src/payment-rollback.ts). Before that, this check read
+          // an unpaid bond as a paid one and the run went green while the
+          // treasury quietly lost a bond per occurrence — 2026-09-12, two
+          // agents, 2 HBAR.
           alreadyDone: async () => markets.get(market.marketId)!.bonds.has(a.agentId),
           onRetry: () => retried++,
         },
@@ -227,7 +234,8 @@ async function main(): Promise<void> {
       if (res.status !== 201 && !landed) {
         throw new Error(`Bond for ${a.agentId} failed: ${res.status}`);
       }
-      process.stdout.write(`    bonded ${i + 1}/${pool.length}`);
+      process.stdout.write(`
+    bonded ${i + 1}/${pool.length}`);
     }
     console.log('');
     if (retried > 0) console.log(`    (${retried} payment(s) needed a retry)`);

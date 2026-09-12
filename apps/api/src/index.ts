@@ -54,6 +54,14 @@ export {
 } from './store.js';
 
 export {
+  logRollback,
+  onPaymentFailure,
+  withPaymentRollback,
+  type RollbackOptions,
+  type RollbackReport,
+} from './payment-rollback.js';
+
+export {
   createPaymentGate,
   DEFAULT_FACILITATOR_TIMEOUT_MS,
   hederaSpendControls,
@@ -81,11 +89,17 @@ export {
   type SettlementResult,
 } from './orchestrator.js';
 
+export { MarketRunner, type MarketRunnerDeps, type RunOutcome } from './runner.js';
+
+export { agentRecords, recordFor, type AgentRecord } from './reputation.js';
+
 export {
   assertPlanBalances,
+  buildRefundPlan,
   buildTransferPlan,
   chunkPlan,
   type PlanInput,
+  type RefundInput,
   type TransferLine,
   type TransferPlan,
 } from './settlement-plan.js';

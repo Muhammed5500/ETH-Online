@@ -77,6 +77,45 @@ describe('bonding aşaması', () => {
   });
 });
 
+describe('teminat kaydını geri alma — ödeme yerleşmediğinde', () => {
+  it('agent havuzdan çıkıyor ve tekrar katılabiliyor', () => {
+    const m = Market.create({ id: 'm', question: 'q', params: params() }, new SeededRandom(1));
+    m.addBondedAgent('a1');
+    m.addBondedAgent('a2');
+
+    m.removeBondedAgent('a1');
+    expect(m.getState().bondedAgents).toEqual(['a2']);
+
+    // Ödemesi ikinci denemede yerleşen agent tekrar girebilmeli; aksi halde
+    // geçici bir facilitator hatası agent'ı markete kalıcı olarak kapatırdı.
+    m.addBondedAgent('a1');
+    expect(m.getState().bondedAgents).toEqual(['a2', 'a1']);
+  });
+
+  it('teminat yatırmamış agent geri alınamıyor', () => {
+    const m = Market.create({ id: 'm', question: 'q', params: params() }, new SeededRandom(1));
+    m.addBondedAgent('a1');
+    expect(() => m.removeBondedAgent('yok')).toThrowError(/teminat yatırmamış/);
+  });
+
+  it('market başladıktan sonra geri alınamıyor', () => {
+    // Çekilmiş bir agent'ı listeden silmek "kim katıldı" kaydını bozar.
+    const m = runningMarket(20, neverStops());
+    expect(() => m.removeBondedAgent('agent-05')).toThrowError(/sadece bonding/);
+  });
+
+  it('geri alma havuzu minPoolSize altına düşürürse market iptal oluyor', () => {
+    const m = Market.create(
+      { id: 'm', question: 'q', params: params({ minPoolSize: 3, ...SMALL_POOL }) },
+      new SeededRandom(1),
+    );
+    for (const id of ['a1', 'a2', 'a3']) m.addBondedAgent(id);
+    m.removeBondedAgent('a2');
+    m.closeBonding();
+    expect(m.status).toBe('cancelled');
+  });
+});
+
 describe('KURAL 1 — bir agent en fazla bir kez katılır', () => {
   it('20 turda hiçbir agent tekrar çekilmiyor', () => {
     // 20 tur × 2 zar (draw + stop), stop asla tutmasın

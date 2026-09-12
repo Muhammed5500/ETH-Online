@@ -170,6 +170,60 @@ export function buildTransferPlan(input: PlanInput): TransferPlan {
   return plan;
 }
 
+export interface RefundInput {
+  readonly marketId: string;
+  /** Every agent that posted a bond, and where to pay it back. */
+  readonly bondAccounts: ReadonlyMap<string, string>;
+  readonly bondTinybar: bigint;
+  readonly depositTinybar: bigint;
+  readonly askerAccountId: string;
+}
+
+/**
+ * The plan for a market that never started.
+ *
+ * A pool below `minPoolSize` cancels: there is nothing to score, no reference
+ * report and no settlement. What there is, is money — the deposit and every
+ * bond posted before the window closed — and it all goes straight back.
+ *
+ * Separate from `buildTransferPlan` on purpose. That function computes
+ * payouts; this one refuses to. A cancelled market where somebody was scored
+ * would mean the mechanism ran on a pool the mechanism itself rejected, and
+ * routing both cases through one function is how that eventually happens.
+ */
+export function buildRefundPlan(input: RefundInput): TransferPlan {
+  const lines: TransferLine[] = [...input.bondAccounts].map(([agentId, accountId]) => ({
+    beneficiary: agentId,
+    accountId,
+    amountTinybar: input.bondTinybar,
+    bondReturnedTinybar: input.bondTinybar,
+    payoutTinybar: 0n,
+    kind: 'not-drawn' as const,
+  }));
+
+  lines.push({
+    beneficiary: 'asker',
+    accountId: input.askerAccountId,
+    amountTinybar: input.depositTinybar,
+    bondReturnedTinybar: 0n,
+    payoutTinybar: input.depositTinybar,
+    kind: 'asker',
+  });
+
+  const totalIn = input.depositTinybar + input.bondTinybar * BigInt(input.bondAccounts.size);
+  const plan: TransferPlan = {
+    marketId: input.marketId,
+    totalInTinybar: totalIn,
+    lines: lines.filter((l) => l.amountTinybar > 0n),
+    totalOutTinybar: totalIn,
+    // Nothing is slashed: no agent was ever drawn, so no agent failed to answer.
+    slashedTinybar: 0n,
+  };
+
+  assertPlanBalances(plan);
+  return plan;
+}
+
 /** Rounds down to whole tinybar. See the rounding note at the top. */
 function floorUnits(units: number, hbarPerUnit: number): bigint {
   if (!Number.isFinite(units) || units < 0) {

@@ -5,7 +5,7 @@
  * the round loop and the settlement arithmetic stay testable without either.
  */
 import { AccountId, Hbar, PrivateKey, TransferTransaction, type Client } from '@hashgraph/sdk';
-import { withRetry } from '@ethonline/hedera';
+import { withFreshTransaction, withRetry } from '@ethonline/hedera';
 import type {
   AgentReportResponse,
   AgentTransport,
@@ -130,10 +130,19 @@ export function hederaPayer(opts: HederaPayerOptions): Payer {
       }
       tx.setTransactionMemo(memo.slice(0, 100));
 
-      const frozen = await tx.freezeWith(opts.client).sign(treasuryKey);
-      const { receipt, transactionId } = await withRetry(async () => {
-        const response = await frozen.execute(opts.client);
-        return { receipt: await response.getReceipt(opts.client), transactionId: response.transactionId };
+      // Rebuilt if it expires, retried with the same id otherwise. An expired
+      // transaction provably never reached consensus, so a fresh id cannot pay
+      // twice; any other failure keeps the frozen id and its DUPLICATE
+      // protection. See packages/hedera/src/retry.ts.
+      const { receipt, transactionId } = await withFreshTransaction(async () => {
+        const frozen = await tx.freezeWith(opts.client).sign(treasuryKey);
+        return withRetry(async () => {
+          const response = await frozen.execute(opts.client);
+          return {
+            receipt: await response.getReceipt(opts.client),
+            transactionId: response.transactionId,
+          };
+        });
       });
 
       return { transactionId: transactionId.toString(), status: receipt.status.toString() };

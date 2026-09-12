@@ -18,6 +18,7 @@ import { ExactHederaScheme } from '@x402/hedera/exact/server';
 import { HBAR_ASSET_ID, HEDERA_TESTNET_CAIP2 } from '@x402/hedera';
 import type { MarketParams } from '@ethonline/core';
 import { bondTinybar, depositTinybar, DEFAULT_RESOLVE_PRICE_TINYBAR } from './pricing.js';
+import { logRollback, withPaymentRollback, type RollbackReport } from './payment-rollback.js';
 import { resolveParams, resolvePrior } from './app.js';
 import type { MarketStore } from './store.js';
 
@@ -43,6 +44,12 @@ export interface PaymentGateOptions {
    * link is merely slow rather than broken.
    */
   readonly facilitatorTimeoutMs?: number;
+  /**
+   * Told whenever a handler's effect had to be undone because the payment for
+   * it did not settle. Defaults to a warning on the console — an operator has
+   * to see this, since it is money that did not arrive.
+   */
+  readonly onRollback?: (report: RollbackReport) => void;
 }
 
 export const DEFAULT_FACILITATOR_TIMEOUT_MS = 30_000;
@@ -135,7 +142,16 @@ export function createPaymentGate(opts: PaymentGateOptions): RequestHandler {
     { network: HEDERA_TESTNET_CAIP2, server: new ExactHederaScheme() },
   ]) as unknown as RequestHandler;
 
-  return onlyPaidRoutes(withFacilitatorErrors(middleware, opts.facilitatorUrl));
+  // The order matters. Outermost is the route filter, so an unpaid route
+  // never touches any of this. Inside it sits the rollback watcher, which has
+  // to see the FINAL status of the response — including the 402 that
+  // `withFacilitatorErrors` and the library itself produce — because that
+  // status is the only signal that the money did not move.
+  return onlyPaidRoutes(
+    withPaymentRollback(withFacilitatorErrors(middleware, opts.facilitatorUrl), {
+      onRollback: opts.onRollback ?? logRollback,
+    }),
+  );
 }
 
 /** The three routes that cost money. Everything else never touches the gate. */
