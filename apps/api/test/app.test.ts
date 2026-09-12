@@ -30,7 +30,7 @@ beforeEach(() => {
 async function registerAgent(agent: TestAgent): Promise<void> {
   await request(api.app)
     .post('/agents/register')
-    .send({ agentId: agent.agentId, accountId: agent.accountId, publicKey: agent.publicKey })
+    .send(agent.registration())
     .expect(201);
 }
 
@@ -66,7 +66,7 @@ describe('POST /agents/register — open to anyone', () => {
     const agent = makeTestAgent('someone-elses-agent');
     const res = await request(api.app)
       .post('/agents/register')
-      .send({ agentId: agent.agentId, accountId: agent.accountId, publicKey: agent.publicKey })
+      .send(agent.registration())
       .expect(201);
     expect(res.body.agent.agentId).toBe('someone-elses-agent');
     expect(res.body.agentCount).toBe(1);
@@ -76,13 +76,12 @@ describe('POST /agents/register — open to anyone', () => {
     const agent = makeTestAgent('agent-01');
     const res = await request(api.app)
       .post('/agents/register')
-      .send({
-        agentId: agent.agentId,
-        accountId: agent.accountId,
-        publicKey: agent.publicKey,
-        endpoint: 'http://localhost:5001/report',
-        sliceIds: ['liquidity', 'holders'],
-      })
+      .send(
+        agent.registration({
+          endpoint: 'http://localhost:5001/report',
+          sliceIds: ['liquidity', 'holders'],
+        }),
+      )
       .expect(201);
     expect(res.body.agent.endpoint).toBe('http://localhost:5001/report');
     expect(res.body.agent.sliceIds).toEqual(['liquidity', 'holders']);
@@ -94,8 +93,45 @@ describe('POST /agents/register — open to anyone', () => {
     const impostor = makeTestAgent('agent-01', 99);
     await request(api.app)
       .post('/agents/register')
-      .send({ agentId: 'agent-01', accountId: impostor.accountId, publicKey: impostor.publicKey })
+      .send(impostor.registration({ agentId: 'agent-01' }))
       .expect(409);
+  });
+
+  it('refuses a registration that is not signed', async () => {
+    const agent = makeTestAgent('unsigned');
+    const { signature, ...unsigned } = agent.registration() as Record<string, unknown>;
+    expect(signature).toBeTruthy();
+    await request(api.app).post('/agents/register').send(unsigned).expect(400);
+  });
+
+  it('refuses a registration signed by somebody else', async () => {
+    // Squatting an id, or worse: re-registering a live agent's endpoint to a
+    // server you control. The victim then gets drawn, answers nothing and
+    // loses its whole bond.
+    const victim = makeTestAgent('agent-01');
+    const attacker = makeTestAgent('attacker', 2);
+    const body = { ...victim.registration(), signature: (attacker.registration() as { signature: string }).signature };
+    await request(api.app).post('/agents/register').send(body).expect(401);
+  });
+
+  it('refuses a stale registration', async () => {
+    const agent = makeTestAgent('stale');
+    const claim = agent.registration() as Record<string, unknown>;
+    // A captured signature must not stay a standing licence to move an
+    // agent's endpoint around.
+    await request(api.app)
+      .post('/agents/register')
+      .send({ ...claim, issuedAt: Date.now() - 60 * 60 * 1000 })
+      .expect(401);
+  });
+
+  it('refuses a registration whose endpoint was swapped after signing', async () => {
+    const agent = makeTestAgent('agent-07');
+    const claim = agent.registration({ endpoint: 'http://good.example/report' });
+    await request(api.app)
+      .post('/agents/register')
+      .send({ ...claim, endpoint: 'http://attacker.example/report' })
+      .expect(401);
   });
 
   it('rejects an incomplete registration', async () => {
@@ -421,7 +457,7 @@ describe('when the payment infrastructure is down', () => {
     await request(down.app).get('/markets').expect(200);
     await request(down.app)
       .post('/agents/register')
-      .send({ agentId: 'a', accountId: '0.0.1', publicKey: 'k' })
+      .send(makeTestAgent('a').registration())
       .expect(201);
     // ...while the paid route correctly refuses.
     await request(down.app).post('/market').send({ question: 'q' }).expect(503);

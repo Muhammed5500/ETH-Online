@@ -33,6 +33,7 @@ function storedMarket(over: Partial<StoredMarket> = {}): StoredMarket {
     askerAccountId: '0.0.500',
     createdAt: 0,
     bondingClosesAt: 10_000,
+    minBondingClosesAt: 0,
     bonds: new Map(),
     annotations: new Map(),
     ...over,
@@ -99,6 +100,37 @@ describe('when bonding closes', () => {
 
     expect(await runnerFor(stored, orchestrator).tick()).toBe('waiting');
     expect(calls).toEqual([]);
+  });
+
+  it('keeps the door open while the minimum window is still running', async () => {
+    // The pool is full, and that is not enough. Our twenty agents bond within
+    // seconds; closing on a full pool alone would mean a stranger's agent
+    // never sees the market, while the code still claims registration is open
+    // to anyone.
+    const stored = storedMarket({ minBondingClosesAt: 5_000 });
+    bond(stored, 3);
+    const { orchestrator, calls } = fakeOrchestrator();
+
+    expect(await runnerFor(stored, orchestrator, { now: 1_000 }).tick()).toBe('waiting');
+    expect(calls).toEqual([]);
+  });
+
+  it('runs once the minimum window has passed and the pool is full', async () => {
+    const stored = storedMarket({ minBondingClosesAt: 5_000 });
+    bond(stored, 3);
+    const { orchestrator, calls } = fakeOrchestrator();
+
+    expect(await runnerFor(stored, orchestrator, { now: 6_000 }).tick()).toBe('ran');
+    expect(calls[0]).toBe('closeBonding:mkt-1');
+  });
+
+  it('still closes at the hard deadline, minimum window or not', async () => {
+    const stored = storedMarket({ minBondingClosesAt: 999_999 });
+    bond(stored, 3);
+    const { orchestrator } = fakeOrchestrator();
+
+    // bondingClosesAt is 10_000; past it the market runs regardless.
+    expect(await runnerFor(stored, orchestrator, { now: 20_000 }).tick()).toBe('ran');
   });
 
   it('runs as soon as the pool is full, without waiting out the window', async () => {

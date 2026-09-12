@@ -3364,3 +3364,69 @@ deposit'i hazinede birakti: 2099314719 tinybar. Sunucu bellek ici store ile
 calistigi icin yeniden baslatmayla market kaydi da gitti. Iade el ile
 yapilacak; hepsi ayni sahibin hesaplari arasinda ama defter kapanmadan
 kapanmis sayilmaz.
+
+## DISARIDAN AGENT — kayit imzasi ve bonding penceresi
+
+"Kayit herkese acik" iddiasi iki yerden sizdiriyordu. Ikisi de kapatildi.
+
+### 1. Kayit, kaydettigi anahtari tuttugunu kanitlamiyordu
+
+`POST /agents/register` public key'i guvenle aliyordu. Para calinamazdi: bond
+o hesabin imzasini gerektirir, rapor da eslesen ozel anahtari. Ama iki sey
+mumkundu.
+
+**Squat.** `agent-07` kimligini once alan, gercek agent-07'nin o ismi bir daha
+kullanmasini engelliyordu, cunku kimlik ilk kayitta sabitleniyor.
+
+**Endpoint kacirma, kotusu bu.** Yeniden kayit degistirilebilir alanlari
+guncelliyor, yani biri canli bir agent'in endpoint'ini kendi sunucusuna
+cevirebilirdi. Gecerli rapor uretemez — ki bu daha kotu: kurban cekilir, cevap
+gelmez, butun teminatini kaybeder.
+
+Artik kayit, kaydettigi anahtarla imzalanmak zorunda. Bu kaydi izne baglamiyor;
+herkes anahtarini tuttugu her seyi kaydedebilir (PLAN 3.3). Sadece "bu anahtar
+benim" iddiasi varsayim olmaktan cikip denetlenebilir hale geliyor.
+
+Imzanin kapsami: agentId, accountId, publicKey, endpoint, dilimler ve
+`issuedAt`. Degistirilebilir alanlar da iceride, cunku yalniz kimligi
+imzalamak yakalanan bir imzayi surekli gecerli bir endpoint tasima ruhsatina
+cevirirdi. `issuedAt` 10 dakikayla sinirli.
+
+`signRegistration` agent paketinde: ucuncu taraf kendi agent'ini yazarken ayni
+uc satiri kullaniyor, kanonik mesaj @ethonline/api'den geliyor. Iki kopya
+byte-birebir bir formatta kacinilmaz olarak birbirinden ayrilir ve sonucu
+anahtar sorunu gibi gorunen bir 401'dir.
+
+### 2. Havuz pratikte disariya kapaliydi
+
+Runner havuz `minPoolSize`'a ulasir ulasmaz bonding'i kapatiyordu. Bizim 20
+agent market acildiktan saniyeler sonra bond'unu oduyor, yani disaridan biri
+fiilen hic yer bulamiyordu. Kodda engel yoktu, zamanlama engeldi — ki bu daha
+kotu, cunku aciklik gibi gorunuyor.
+
+`minBondingWindowMs` eklendi, varsayilan 45 saniye. Havuz dolsa bile kapi o
+sure dolmadan kapanmiyor. Sert son tarih (`bondingClosesAt`) aynen duruyor:
+oraya gelindiginde havuz yeterliyse kosuyor, degilse iptal edilip iade
+yapiliyor. `MIN_BONDING_WINDOW_MS=0` eski davranisi geri getiriyor.
+
+### Dogrulandi
+
+```
+filo yeniden basladi -> 20/20 imzali kayit gecti
+imzasiz kayit denemesi -> 400
+sunucu banner: "Bonding: open to new agents for at least 45s per market"
+7 yeni test (imza yok / baskasinin imzasi / bayat / endpoint degistirilmis;
+             pencere dolmadan kapanmiyor / dolunca kosuyor / sert son tarih)
+toplam 750 -> 757
+```
+
+### Kapatilmayan iki sey
+
+**Her sey hala localhost.** API 4020'de, agent'lar 4100-4119'da. Ucuncu tarafin
+gercekten katilabilmesi icin API'nin herkese acik bir adreste olmasi ve onun
+endpoint'ine bizim sunucudan erisilebilmesi gerekiyor. Bu kod degil dagitim
+sorunu.
+
+**Dilimler hala beyan.** Agent `sliceIds` alanina ne yazarsa o kaydediliyor ve
+hicbir sey gercekten sorgu yaptigini kanitlamiyor. Paper bunu acikca gelecek
+calisma olarak isaretliyor.

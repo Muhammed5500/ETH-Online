@@ -10,8 +10,10 @@
  *
  * WHEN BONDING CLOSES, AND WHY THE TWO CASES DIFFER.
  *
- *   pool full     close immediately and run. Waiting out the rest of the
- *                 window would add minutes for nothing.
+ *   pool full     close and run, but never before the minimum bonding window
+ *                 has passed. Ours fills in seconds; closing on that alone
+ *                 would shut the door before anybody else's agent had seen
+ *                 the market at all.
  *   window over,  the market cannot run: below `minPoolSize` the pool empties
  *   pool short    almost at once and the stopping time stops being
  *                 unpredictable, which is the assumption the mechanism rests
@@ -80,7 +82,11 @@ export class MarketRunner {
     for (const stored of this.pending()) {
       const full = stored.bonds.size >= stored.params.minPoolSize;
       const expired = this.now() >= stored.bondingClosesAt;
-      if (!full && !expired) continue;
+      // A full pool is not enough on its own. Ours fills in seconds, and
+      // closing on it would make "registration is open to anyone" true in the
+      // code and false in practice — see ApiConfig.minBondingWindowMs.
+      const doorMayClose = this.now() >= stored.minBondingClosesAt;
+      if (!expired && !(full && doorMayClose)) continue;
 
       this.handled.add(stored.id);
       return full ? this.run(stored) : this.cancel(stored);

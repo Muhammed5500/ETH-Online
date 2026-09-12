@@ -22,7 +22,13 @@
 import { randomUUID } from 'node:crypto';
 import express, { type Express } from 'express';
 import { PrivateKey } from '@hashgraph/sdk';
-import { canonicalReportMessage, reportMessageBytes } from '@ethonline/api';
+import {
+  canonicalReportMessage,
+  canonicalRegistrationMessage,
+  registrationMessageBytes,
+  reportMessageBytes,
+  type RegistrationClaim,
+} from '@ethonline/api';
 import { beliefFromProbability, type Belief } from '@ethonline/core';
 import type { Agent, AgentConfig, PriorReport } from './runner.js';
 
@@ -183,4 +189,19 @@ export function createAgentServer(deps: AgentServerDeps): AgentServer {
   });
 
   return { app, agentId: deps.config.id, instanceId };
+}
+
+/**
+ * Signs a registration, so the API can check the key is really this agent's.
+ *
+ * Lives here rather than in the fleet script because it is part of the agent's
+ * contract with the API, and a third party writing their own agent needs the
+ * same three lines. The canonical message comes from `@ethonline/api` for the
+ * same reason the report one does: two copies of a byte-exact format drift the
+ * moment either side is touched, and the failure is a 401 that reads like a
+ * key problem.
+ */
+export function signRegistration(key: PrivateKey, claim: RegistrationClaim): string {
+  canonicalRegistrationMessage(claim);
+  return Buffer.from(key.sign(registrationMessageBytes(claim))).toString('hex');
 }

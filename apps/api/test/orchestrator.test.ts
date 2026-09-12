@@ -75,12 +75,7 @@ async function seedMarket(marketParams?: Partial<MarketParams>): Promise<string>
   for (const a of agents) {
     await request(api.app)
       .post('/agents/register')
-      .send({
-        agentId: a.agentId,
-        accountId: a.accountId,
-        publicKey: a.publicKey,
-        endpoint: `http://localhost:9/${a.agentId}`,
-      })
+      .send(a.registration({ endpoint: `http://localhost:9/${a.agentId}` }))
       .expect(201);
   }
   const res = await request(api.app)
@@ -115,7 +110,7 @@ describe('closeBonding', () => {
     for (const a of agents) {
       await request(api.app)
         .post('/agents/register')
-        .send({ agentId: a.agentId, accountId: a.accountId, publicKey: a.publicKey })
+        .send(a.registration())
         .expect(201);
     }
     const res = await request(api.app).post('/market').send({ question: 'q' }).expect(201);

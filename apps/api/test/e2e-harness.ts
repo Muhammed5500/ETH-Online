@@ -41,7 +41,7 @@ import { createApp, DEFAULT_API_CONFIG } from '../src/app.js';
 import { hederaLedger } from '../src/ledger.js';
 import { createPaymentGate, payWithRetry, warmUpFacilitator } from '../src/payment.js';
 import { MarketStore, AgentRegistry } from '../src/store.js';
-import { canonicalReportMessage } from '../src/signatures.js';
+import { canonicalReportMessage, registrationMessageBytes } from '../src/signatures.js';
 
 const REPO_ROOT = join(import.meta.dirname, '..', '..', '..');
 
@@ -206,14 +206,20 @@ export async function registerAgents(
 ): Promise<void> {
   for (const a of accounts) {
     const publicKey = PrivateKey.fromStringECDSA(a.privateKey).publicKey.toStringDer();
+    const claim = {
+      agentId: a.agentId,
+      accountId: a.accountId,
+      publicKey,
+      endpoint: `http://localhost:${agentPort}/${a.agentId}`,
+      issuedAt: Date.now(),
+    };
+    const key = PrivateKey.fromStringECDSA(a.privateKey);
     const res = await fetch(`${base}/agents/register`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
-        agentId: a.agentId,
-        accountId: a.accountId,
-        publicKey,
-        endpoint: `http://localhost:${agentPort}/${a.agentId}`,
+        ...claim,
+        signature: Buffer.from(key.sign(registrationMessageBytes(claim))).toString('hex'),
       }),
     });
     if (res.status !== 201) {

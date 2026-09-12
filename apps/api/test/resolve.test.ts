@@ -92,6 +92,7 @@ function seedClosedMarket(question: string, beliefs: readonly number[]): string 
     bondTinybar: bondTinybar(SMALL),
     createdAt: Date.now(),
     bondingClosesAt: Date.now() + 1000,
+    minBondingClosesAt: 0,
     bonds: new Map(),
     annotations,
   });
@@ -148,6 +149,7 @@ describe('finding an existing market', () => {
       bondTinybar: 1n,
       createdAt: Date.now(),
       bondingClosesAt: Date.now(),
+      minBondingClosesAt: 0,
       bonds: new Map(),
       annotations: new Map(),
     });
@@ -171,6 +173,7 @@ describe('finding an existing market', () => {
       bondTinybar: 1n,
       createdAt: Date.now(),
       bondingClosesAt: Date.now() + 1000,
+      minBondingClosesAt: 0,
       bonds: new Map(),
       annotations: new Map(),
     });
@@ -227,6 +230,7 @@ describe('the answer that is sold', () => {
           bondTinybar: 1n,
           createdAt: 0,
           bondingClosesAt: 0,
+          minBondingClosesAt: 0,
           bonds: new Map(),
           annotations: new Map(),
         },

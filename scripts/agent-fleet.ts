@@ -48,6 +48,7 @@ import {
   buildAgentPool,
   createAgentServer,
   openAiLlm,
+  signRegistration,
   stubLlm,
   type AgentBehavior,
   type LlmClient,
@@ -224,15 +225,23 @@ async function main(): Promise<void> {
     // which is the opposite of what a fleet should do.
     let status: string;
     try {
+      // Signed with the same key that will sign this agent's reports and pay
+      // its bonds. The API refuses a registration that cannot prove it holds
+      // the key it registers.
+      const claim = {
+        agentId: config.id,
+        accountId: config.accountId,
+        publicKey: config.publicKey,
+        endpoint,
+        sliceIds: config.sliceIds,
+        issuedAt: Date.now(),
+      };
       const res = await fetch(`${API_URL}/agents/register`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
-          agentId: config.id,
-          accountId: config.accountId,
-          publicKey: config.publicKey,
-          endpoint,
-          sliceIds: config.sliceIds,
+          ...claim,
+          signature: signRegistration(PrivateKey.fromStringECDSA(config.privateKey), claim),
         }),
       });
       status = res.ok ? 'registered' : `not registered (${res.status})`;

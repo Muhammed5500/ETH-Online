@@ -42,6 +42,7 @@ export {
 export {
   createAgentServer,
   parseAgentKey,
+  signRegistration,
   signReport,
   type AgentServer,
   type AgentServerDeps,

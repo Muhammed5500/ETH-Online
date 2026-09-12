@@ -89,6 +89,13 @@ export interface StoredMarket {
   readonly askerAccountId?: string;
   readonly createdAt: number;
   readonly bondingClosesAt: number;
+  /**
+   * The earliest the runner may close bonding, even with a full pool.
+   *
+   * Keeps the door open long enough for an agent that is not ours to see the
+   * market and pay its way in. See ApiConfig.minBondingWindowMs.
+   */
+  readonly minBondingClosesAt: number;
   readonly bonds: Map<string, BondRecord>;
   /** Position to what the agent said about that report. Display only. */
   readonly annotations: Map<number, ReportAnnotation>;

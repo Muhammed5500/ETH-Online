@@ -75,7 +75,7 @@ function buildApi(gate: RequestHandler): Api {
 async function registerAgent(api: Api, agent: TestAgent): Promise<void> {
   await request(api.app)
     .post('/agents/register')
-    .send({ agentId: agent.agentId, accountId: agent.accountId, publicKey: agent.publicKey })
+    .send(agent.registration())
     .expect(201);
 }
 

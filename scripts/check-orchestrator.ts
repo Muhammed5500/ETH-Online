@@ -44,6 +44,7 @@ import { MarketStore } from '../apps/api/src/store.js';
 import { Orchestrator } from '../apps/api/src/orchestrator.js';
 import { httpAgentTransport, hederaPayer } from '../apps/api/src/transport.js';
 import { canonicalReportMessage } from '../apps/api/src/signatures.js';
+import { signRegistration } from '../apps/agent/src/server.js';
 import { tinybarToHbar } from '../apps/api/src/pricing.js';
 
 const API_PORT = 4061;
@@ -179,14 +180,19 @@ async function main(): Promise<void> {
       const endpoint = EXTERNAL_AGENTS
         ? `http://127.0.0.1:${AGENT_BASE_PORT + i}/report`
         : `http://localhost:${AGENT_PORT}/${a.agentId}`;
+      const claim = {
+        agentId: a.agentId,
+        accountId: a.accountId,
+        publicKey,
+        endpoint,
+        issuedAt: Date.now(),
+      };
       const res = await fetch(`${API}/agents/register`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
-          agentId: a.agentId,
-          accountId: a.accountId,
-          publicKey,
-          endpoint,
+          ...claim,
+          signature: signRegistration(PrivateKey.fromStringECDSA(a.privateKey), claim),
         }),
       });
       if (res.status !== 201) throw new Error(`Registering ${a.agentId} failed: ${res.status}`);

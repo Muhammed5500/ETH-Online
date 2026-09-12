@@ -35,6 +35,16 @@ export {
 } from './pricing.js';
 
 export {
+  canonicalRegistrationMessage,
+  registrationMessageBytes,
+  REGISTRATION_MAX_AGE_MS,
+  REGISTRATION_SIGNATURE_DOMAIN,
+  REGISTRATION_SIGNATURE_VERSION,
+  verifyRegistrationSignature,
+  type RegistrationClaim,
+} from './signatures.js';
+
+export {
   canonicalReportMessage,
   REPORT_SIGNATURE_DOMAIN,
   REPORT_SIGNATURE_VERSION,

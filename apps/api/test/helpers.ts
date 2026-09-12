@@ -15,7 +15,11 @@ import { PrivateKey } from '@hashgraph/sdk';
 import type { HcsMessage } from '@ethonline/hedera';
 import { createMemoryLedger, type MemoryLedger } from '../src/memory-ledger.js';
 import type { LedgerAppend } from '../src/ledger.js';
-import { canonicalReportMessage, type ReportClaim } from '../src/signatures.js';
+import {
+  canonicalReportMessage,
+  registrationMessageBytes,
+  type ReportClaim,
+} from '../src/signatures.js';
 
 export interface FakeLedger extends MemoryLedger {
   /** Makes the next write fail, to cover the chain-is-down path. */
@@ -65,6 +69,14 @@ export interface TestAgent {
   readonly publicKey: string;
   readonly privateKey: PrivateKey;
   sign(claim: ReportClaim): string;
+  /** A registration body, signed the way a real agent signs one. */
+  registration(extras?: {
+    endpoint?: string;
+    sliceIds?: readonly string[];
+    /** Claim a different id or account, for the impostor cases. */
+    agentId?: string;
+    accountId?: string;
+  }): Record<string, unknown>;
 }
 
 /** An agent with a real key pair, so signature checks exercise real crypto. */
@@ -78,6 +90,20 @@ export function makeTestAgent(agentId: string, accountIdSuffix = 1): TestAgent {
     sign(claim: ReportClaim): string {
       const bytes = new Uint8Array(Buffer.from(canonicalReportMessage(claim), 'utf-8'));
       return Buffer.from(privateKey.sign(bytes)).toString('hex');
+    },
+    registration(extras = {}) {
+      const claim = {
+        agentId: extras.agentId ?? agentId,
+        accountId: extras.accountId ?? `0.0.${100000 + accountIdSuffix}`,
+        publicKey: privateKey.publicKey.toStringDer(),
+        ...(extras.endpoint ? { endpoint: extras.endpoint } : {}),
+        ...(extras.sliceIds ? { sliceIds: extras.sliceIds } : {}),
+        issuedAt: Date.now(),
+      };
+      return {
+        ...claim,
+        signature: Buffer.from(privateKey.sign(registrationMessageBytes(claim))).toString('hex'),
+      };
     },
   };
 }

@@ -45,7 +45,7 @@ import { HcsRandomSource, type HcsMessage, type HederaNetwork } from '@ethonline
 import type { Ledger } from './ledger.js';
 import { bondTinybar, depositTinybar, DEFAULT_HBAR_PER_UNIT, unitsToTinybar } from './pricing.js';
 import { summarize } from './settlement-progress.js';
-import { verifyReportSignature } from './signatures.js';
+import { verifyRegistrationSignature, verifyReportSignature } from './signatures.js';
 import { onPaymentFailure } from './payment-rollback.js';
 import { agentRecords, recordFor } from './reputation.js';
 import {
@@ -67,6 +67,17 @@ export interface ApiConfig {
   readonly hbarPerUnit: number;
   /** How long agents have to bond after a market opens. */
   readonly bondingWindowMs: number;
+  /**
+   * The floor on that window, even after the pool is full.
+   *
+   * WITHOUT THIS THE POOL IS OPEN IN NAME ONLY. The runner used to close
+   * bonding the moment `minPoolSize` was reached, and the twenty agents this
+   * deployment runs bond within seconds of a market opening. Registration was
+   * open to anyone and a stranger could still never get in, because the door
+   * shut before they saw the market. Nothing in the code refused them; the
+   * timing did, which is worse, because it looks like openness.
+   */
+  readonly minBondingWindowMs: number;
   readonly defaultParams: MarketParams;
 }
 
@@ -74,6 +85,7 @@ export const DEFAULT_API_CONFIG: ApiConfig = {
   network: 'testnet',
   hbarPerUnit: DEFAULT_HBAR_PER_UNIT,
   bondingWindowMs: 5 * 60 * 1000,
+  minBondingWindowMs: 45 * 1000,
   defaultParams: DEFAULT_PARAMS,
 };
 
@@ -176,6 +188,7 @@ export function publicMarketView(m: StoredMarket): Record<string, unknown> {
     bondTinybar: m.bondTinybar.toString(),
     createdAt: m.createdAt,
     bondingClosesAt: m.bondingClosesAt,
+    minBondingClosesAt: m.minBondingClosesAt,
   };
 }
 
@@ -229,6 +242,36 @@ export function createApp(deps: AppDeps): Api {
     } catch (e) {
       return fail(res, 400, 'Invalid registration', (e as Error).message);
     }
+
+    // Open, but not unauthenticated. Anyone may register anything they hold
+    // the key for; nobody may register a key they do not hold. Without this a
+    // stranger could squat an agent id, or re-register a live agent's endpoint
+    // to a server they control — the victim then gets drawn, answers nothing
+    // and loses its whole bond. See signatures.ts.
+    const signature = typeof body['signature'] === 'string' ? body['signature'] : undefined;
+    const issuedAt = Number(body['issuedAt']);
+    if (!signature || !Number.isFinite(issuedAt)) {
+      return fail(
+        res,
+        400,
+        'Invalid registration',
+        'A registration must carry "signature" and "issuedAt": sign the canonical ' +
+          'registration message with the key you are registering.',
+      );
+    }
+    const proof = verifyRegistrationSignature(
+      {
+        agentId: agent.agentId,
+        accountId: agent.accountId,
+        publicKey: agent.publicKey,
+        ...(agent.endpoint ? { endpoint: agent.endpoint } : {}),
+        ...(agent.sliceIds ? { sliceIds: agent.sliceIds } : {}),
+        issuedAt,
+      },
+      signature,
+      now(),
+    );
+    if (!proof.ok) return fail(res, 401, 'Registration is not signed by its own key', proof.reason);
 
     try {
       const saved = registry.register(agent);
@@ -318,6 +361,7 @@ export function createApp(deps: AppDeps): Api {
             : {}),
           createdAt: now(),
           bondingClosesAt: now() + config.bondingWindowMs,
+          minBondingClosesAt: now() + config.minBondingWindowMs,
           bonds: new Map(),
           annotations: new Map(),
         });
@@ -854,6 +898,7 @@ export function createApp(deps: AppDeps): Api {
             : {}),
           createdAt: now(),
           bondingClosesAt: now() + config.bondingWindowMs,
+          minBondingClosesAt: now() + config.minBondingWindowMs,
           bonds: new Map(),
           annotations: new Map(),
         });

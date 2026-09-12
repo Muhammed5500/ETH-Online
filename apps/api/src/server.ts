@@ -80,11 +80,18 @@ async function main(): Promise<void> {
     hbarPerUnit,
   });
 
+  // How long a market stays open to new agents even after ours have filled
+  // it. Set it to 0 for a fast local demo; leave it alone for anything a
+  // stranger is invited to join.
+  const minBondingWindowMs = Number(
+    readEnv(process.env, 'MIN_BONDING_WINDOW_MS') ?? DEFAULT_API_CONFIG.minBondingWindowMs,
+  );
+
   const { app, config, registry } = createApp({
     ledger: hederaLedger(client),
     markets,
     paymentGate,
-    config: { network: cfg.network, hbarPerUnit },
+    config: { network: cfg.network, hbarPerUnit, minBondingWindowMs },
   });
 
   // ---- the thing that actually runs a market ----------------------------
@@ -186,6 +193,9 @@ async function main(): Promise<void> {
     );
     console.log(
       `  Runner:        polling every ${readEnv(process.env, 'RUNNER_INTERVAL_MS') ?? 3000}ms`,
+    );
+    console.log(
+      `  Bonding:       open to new agents for at least ${Math.round(minBondingWindowMs / 1000)}s per market`,
     );
     console.log('\n  Paid:   POST /market, POST /market/:id/bond, POST /resolve');
     console.log('  Signed: POST /market/:id/report');

@@ -65,6 +65,7 @@ function marketWith(
     bondTinybar: 100_000_000n,
     createdAt: 0,
     bondingClosesAt: 0,
+    minBondingClosesAt: 0,
     bonds,
     annotations: new Map(),
   };
