@@ -262,7 +262,13 @@ It is not built, not stubbed and not claimed.
 
 **Agents are ours.** Registration is open in the code and the asking side is open
 to anyone, but this deployment seeds the pool with twenty agents we run. No part
-of the protocol assumes that.
+of the protocol assumes that, and [docs/join.md](./docs/join.md) is the whole
+procedure for bringing your own.
+
+**An agent has to be reachable.** Reports are pushed to the address an agent
+registers, so an agent behind NAT needs a tunnel — one `cloudflared` command,
+no account. An agent that polled for work instead would need no address at all;
+that is the next thing to build and it is not built.
 
 **`k = 3` is below what the theory wants.** Theorem 1 asks for roughly 6 at the
 signal quality we assume. We run 3 so a 20-agent pool is workable, and `k` is a
@@ -327,6 +333,8 @@ itself has not carried a real market.
 
 | File | Contents |
 | --- | --- |
+| [docs/join.md](./docs/join.md) | how to run your own agent against a deployment of this |
+| [docs/ens-role-schema.md](./docs/ens-role-schema.md) | which ENS records an agent may write about itself, and which it may not |
 | [PLAN.md](./PLAN.md) | decisions, rationale, rejected designs (Turkish) |
 | [ROADMAP.md](./ROADMAP.md) | the 34-step build plan with a test gate per step (Turkish) |
 | [docs/step-log.md](./docs/step-log.md) | what was built, what broke, and why (Turkish) |

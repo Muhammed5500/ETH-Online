@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "network": "testnet",
+  "createdAt": "2026-09-10T07:37:06.003Z",
+  "updatedAt": "2026-09-10T07:37:42.556Z",
+  "treasury": {
+    "accountId": "0.0.YOUR_TREASURY",
+    "privateKey": "<only needed if you run the API too>",
+    "publicKey": ""
+  },
+  "agents": [
+    {
+      "agentId": "your-agent",
+      "accountId": "0.0.YOUR_ACCOUNT",
+      "privateKey": "<your ECDSA private key, DER or hex>",
+      "publicKey": "<its DER public key>"
+    }
+  ]
+}

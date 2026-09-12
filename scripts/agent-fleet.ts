@@ -76,6 +76,21 @@ function flagValue(name: string): string | undefined {
  */
 const MAX_BOND_TINYBAR = BigInt(readEnv(process.env, 'AGENT_MAX_BOND_TINYBAR') ?? '500000000');
 
+/**
+ * The address the orchestrator should use to reach this agent.
+ *
+ * WHY THIS EXISTS. Reports are pushed: the orchestrator POSTs to the endpoint
+ * an agent registered. `127.0.0.1` is right when the API shares the machine
+ * and useless when it does not — an agent on a laptop behind NAT registers an
+ * address nothing can reach, gets drawn, answers nothing, and loses its whole
+ * bond. That failure costs money and looks like the agent went quiet.
+ *
+ * So an agent joining a remote API publishes where it can actually be found:
+ * a tunnel (`cloudflared tunnel --url http://localhost:4100`) or a host. One
+ * base serves one agent, because each agent listens on its own port.
+ */
+const PUBLIC_BASE = readEnv(process.env, 'AGENT_PUBLIC_BASE')?.replace(/\/+$/, '');
+
 /** A fetch that answers a 402 by paying it, with this agent's own key. */
 function payingFetch(accountId: string, privateKey: string) {
   const signer = createClientHederaSigner(accountId, PrivateKey.fromStringECDSA(privateKey), {
@@ -125,6 +140,21 @@ async function main(): Promise<void> {
   const offline = process.argv.includes('--offline');
   const bonding = !process.argv.includes('--no-bond');
   const count = Number(flagValue('--count') ?? 20);
+
+  // One tunnel points at one port, so one public base can only speak for one
+  // agent. Registering twenty agents at the same address would send every
+  // report request to whichever of them happens to be on that port.
+  if (PUBLIC_BASE && count !== 1) {
+    console.error(
+      `
+  AGENT_PUBLIC_BASE is set, so this fleet publishes one address — run it with ` +
+        `--count 1.
+  For more agents behind tunnels, start one process per agent with its ` +
+        `own AGENT_BASE_PORT and its own tunnel.
+`,
+    );
+    process.exit(1);
+  }
   const liar = flagValue('--liar');
   const lazy = flagValue('--lazy');
 
@@ -191,7 +221,7 @@ async function main(): Promise<void> {
 
     const { app, instanceId } = createAgentServer({ agent, config });
     const port = BASE_PORT + i;
-    const endpoint = `http://127.0.0.1:${port}/report`;
+    const endpoint = PUBLIC_BASE ? `${PUBLIC_BASE}/report` : `http://127.0.0.1:${port}/report`;
 
     await new Promise<void>((resolve, reject) => {
       // The callback is wrapped rather than passed straight through: `listen`
@@ -284,6 +314,7 @@ async function main(): Promise<void> {
   console.log('\nAGENT FLEET');
   console.log('='.repeat(74));
   console.log(`  API        ${API_URL}`);
+  console.log(`  Reachable  ${PUBLIC_BASE ? `${PUBLIC_BASE}/report` : 'localhost only (set AGENT_PUBLIC_BASE to join a remote API)'}`);
   console.log(`  Model      ${offline ? 'offline stub' : `openai:${model ?? 'default'}`}`);
   console.log(`  Evidence   ${gateway ? 'The Graph gateway' : 'none (offline)'}`);
   console.log(
