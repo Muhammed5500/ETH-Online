@@ -34,6 +34,7 @@ import {
   type MarketParams,
 } from '@ethonline/core';
 import { ApiError, api } from '../lib/api.ts';
+import { usePolling } from '../lib/usePolling.ts';
 import { useWallet } from '../lib/useWallet.tsx';
 import { depositBreakdown, expectedLength, formatHbar, percent, poolExhaustionRisk } from '../lib/format.ts';
 import { ErrorBox, Field, Panel } from '../components/ui.tsx';
@@ -95,6 +96,11 @@ export function NewMarket(): ReactNode {
 
   const prior = useMemo(() => beliefFromProbability(priorPercent / 100), [priorPercent]);
   const validation = useMemo(() => validateParams(params), [params]);
+  // What THIS deployment charges on top of the deposit. Read rather than
+  // assumed: a page that hardcodes zero would quote a price the server does
+  // not honour, and the first the asker hears of it is the wallet prompt.
+  const deployment = usePolling(() => api.health(), [], { intervalMs: 60_000 });
+  const protocolFee = BigInt(deployment.data?.protocolFeeTinybar ?? '0');
   const deposit = useMemo(
     () => (validation.ok ? depositBreakdown(params, prior) : undefined),
     [params, prior, validation.ok],
@@ -303,7 +309,7 @@ export function NewMarket(): ReactNode {
             <div className="flex items-baseline justify-between">
               <span className="text-sm text-slate-400">Deposit</span>
               <span className="font-mono text-2xl font-semibold text-slate-100 tnum">
-                {formatHbar(deposit.tinybar)}
+                {formatHbar(deposit.tinybar + protocolFee)}
               </span>
             </div>
             <dl className="mt-4 space-y-2 border-t border-[var(--color-edge)] pt-4 text-xs">
@@ -324,9 +330,28 @@ export function NewMarket(): ReactNode {
                 <dt className="text-slate-400">total, in mechanism units</dt>
                 <dd className="font-mono text-slate-100 tnum">{deposit.units.toFixed(4)}</dd>
               </div>
+              {protocolFee > 0n && (
+                <>
+                  <div className="flex justify-between">
+                    <dt
+                      className="text-slate-500"
+                      title="Charged on top of the deposit and kept by this deployment. It is not part of what the mechanism can pay out, so it cannot change what an agent earns for being right."
+                    >
+                      protocol fee — outside the scoring pot
+                    </dt>
+                    <dd className="font-mono text-slate-300 tnum">{formatHbar(protocolFee)}</dd>
+                  </div>
+                  <div className="flex justify-between border-t border-[var(--color-edge)] pt-2">
+                    <dt className="text-slate-200">you pay</dt>
+                    <dd className="font-mono text-slate-100 tnum">
+                      {formatHbar(deposit.tinybar + protocolFee)}
+                    </dd>
+                  </div>
+                </>
+              )}
             </dl>
             <p className="mt-4 text-[11px] leading-relaxed text-slate-500">
-              This is a ceiling, not a fee. Whatever the market does not spend comes back to you,
+              The deposit is a ceiling, not a fee. Whatever the market does not spend comes back to you,
               and so does every penalty taken off an agent — losses are refunded to the asker
               rather than shared out, so no agent ever profits from another's mistake.
             </p>
@@ -378,7 +403,9 @@ export function NewMarket(): ReactNode {
           disabled={!canSubmit}
           className="rounded-md bg-slate-100 px-4 py-2 text-sm font-medium text-slate-900 transition hover:bg-white disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-500"
         >
-          {submitting ? 'Opening…' : `Open market${deposit ? ` — ${formatHbar(deposit.tinybar, 2)}` : ''}`}
+          {submitting
+            ? 'Opening…'
+            : `Open market${deposit ? ` — ${formatHbar(deposit.tinybar + protocolFee, 2)}` : ''}`}
         </button>
       </div>
     </div>

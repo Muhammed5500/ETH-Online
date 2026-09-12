@@ -1,4 +1,11 @@
 /**
+ * COLOUR HERE IS ONE SERIES AND TWO STATUSES, WHICH IS WHY THERE IS NO PALETTE.
+ * The price is a single line, so it wears ink rather than a hue — a colour
+ * would imply a second series to tell it apart from. The two coloured marks
+ * are states, not categories: violet for the reference report, amber for one
+ * the protocol had to clip. Both are labelled in the tooltip and badged in the
+ * feed beside the chart, so neither is ever colour alone.
+ *
  * The price chart.
  *
  * WHAT IT HAS TO MAKE OBVIOUS, in the roadmap's words: that the price moves,
@@ -50,20 +57,20 @@ function PointDot(props: {
     return (
       <g>
         <circle cx={cx} cy={cy} r={9} fill="#a78bfa" fillOpacity={0.18} />
-        <circle cx={cx} cy={cy} r={4.5} fill="#a78bfa" stroke="#0d1117" strokeWidth={1.5} />
+        <circle cx={cx} cy={cy} r={4.5} fill="#a78bfa" stroke="#0e131b" strokeWidth={1.5} />
       </g>
     );
   }
   if (payload.position === 0) {
-    return <circle cx={cx} cy={cy} r={3} fill="#64748b" stroke="#0d1117" strokeWidth={1.5} />;
+    return <circle cx={cx} cy={cy} r={3} fill="#6b7c92" stroke="#0e131b" strokeWidth={1.5} />;
   }
   return (
     <Dot
       cx={cx}
       cy={cy}
       r={3}
-      fill={payload.clipped ? '#fbbf24' : '#e2e8f0'}
-      stroke="#0d1117"
+      fill={payload.clipped ? '#fbbf24' : '#e8eef6'}
+      stroke="#0e131b"
       strokeWidth={1.5}
     />
   );
@@ -109,18 +116,18 @@ export function PriceChart({
     <div className="h-64 w-full">
       <ResponsiveContainer width="100%" height="100%">
         <LineChart data={data} margin={{ top: 8, right: 16, bottom: 4, left: -8 }}>
-          <CartesianGrid stroke="#1c2531" strokeDasharray="2 4" />
+          <CartesianGrid stroke="#1e2836" strokeDasharray="2 4" />
           <XAxis
             dataKey="position"
-            stroke="#475569"
-            tick={{ fill: '#64748b', fontSize: 11 }}
+            stroke="#3d4d61"
+            tick={{ fill: '#6b7c92', fontSize: 11 }}
             tickLine={false}
-            axisLine={{ stroke: '#1c2531' }}
+            axisLine={{ stroke: '#1e2836' }}
             label={{
               value: 'report',
               position: 'insideBottomRight',
               offset: -2,
-              fill: '#475569',
+              fill: '#3d4d61',
               fontSize: 11,
             }}
           />
@@ -128,19 +135,19 @@ export function PriceChart({
             domain={[0, 1]}
             ticks={[0, 0.25, 0.5, 0.75, 1]}
             tickFormatter={(v: number) => `${Math.round(v * 100)}%`}
-            stroke="#475569"
-            tick={{ fill: '#64748b', fontSize: 11 }}
+            stroke="#3d4d61"
+            tick={{ fill: '#6b7c92', fontSize: 11 }}
             tickLine={false}
             axisLine={false}
             width={44}
           />
           {/* The opening price, so every move is read against where it started. */}
-          <ReferenceLine y={prior[1]} stroke="#334155" strokeDasharray="4 4" />
-          <Tooltip content={<ChartTooltip />} cursor={{ stroke: '#334155' }} />
+          <ReferenceLine y={prior[1]} stroke="#2c3a4c" strokeDasharray="4 4" />
+          <Tooltip content={<ChartTooltip />} cursor={{ stroke: '#2c3a4c' }} />
           <Line
             type="linear"
             dataKey="p"
-            stroke="#e2e8f0"
+            stroke="#e8eef6"
             strokeWidth={1.5}
             dot={<PointDot />}
             activeDot={false}

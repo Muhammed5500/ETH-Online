@@ -67,6 +67,46 @@ export function bondTinybar(params: MarketParams, hbarPerUnit = DEFAULT_HBAR_PER
 }
 
 /**
+ * What the protocol charges the asker on top of the deposit.
+ *
+ * WHY A FEE CAN LIVE HERE AND NOWHERE ELSE. The mechanism's guarantee is about
+ * the SCORING pot: total scored payout never exceeds `b·H(r, q⁰)`, which is
+ * what makes an agent's expected payoff exactly `S_CEM` and honesty its best
+ * strategy (paper Theorem 6). A fee taken out of agent payouts would change
+ * that function and quietly sell the only claim this project has.
+ *
+ * This one is charged at the door instead. The asker pays `deposit + fee`; the
+ * market is funded with the deposit and settles exactly as before, and the fee
+ * never enters the pot the settlement pays out of. Nothing downstream can tell
+ * the difference — which is the point.
+ *
+ * It is also quoted in the 402 before anybody pays, so it is a price rather
+ * than a deduction.
+ *
+ * Zero by default: a deployment that wants to charge says so, and the demo
+ * stays exactly as it was measured.
+ */
+export const DEFAULT_PROTOCOL_FEE_TINYBAR = 0n;
+
+/**
+ * What opening a market actually costs, fee included.
+ *
+ * The one number quoted to the asker. `depositTinybar` stays the mechanism's
+ * number, because that is what settlement is allowed to spend.
+ */
+export function marketPriceTinybar(
+  params: MarketParams,
+  prior: Belief,
+  hbarPerUnit = DEFAULT_HBAR_PER_UNIT,
+  protocolFeeTinybar = DEFAULT_PROTOCOL_FEE_TINYBAR,
+): bigint {
+  if (protocolFeeTinybar < 0n) {
+    throw new Error(`protocolFeeTinybar cannot be negative, got: ${protocolFeeTinybar}`);
+  }
+  return depositTinybar(params, prior, hbarPerUnit) + protocolFeeTinybar;
+}
+
+/**
  * The per-call price of the resolution service (STEP 22).
  *
  * Flat, unlike the other two: the caller is buying an answer, not funding a

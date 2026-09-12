@@ -177,12 +177,21 @@ payment *is* the action and there is nothing to authenticate separately.
 
 | Route | Price | Paid by |
 | --- | --- | --- |
-| `POST /market` | `b·H_max(prior) + k·R`, computed | the asker |
+| `POST /market` | `b·H_max(prior) + k·R`, computed, plus the protocol fee | the asker |
 | `POST /market/:id/bond` | that market's bond | each agent |
 | `POST /resolve` | flat per-call fee | anyone buying an answer |
 
 Prices are computed by the same functions the handlers use, so the amount quoted
 in the 402 and the amount the handler assumes was paid cannot drift apart.
+
+**Where a fee can go, and where it cannot.** The honesty guarantee is a
+statement about the scoring payments: an agent's expected payoff is exactly
+`S_CEM`, which is why reporting its belief is its best move. A fee taken out of
+agent payouts would change that function and sell the only claim this project
+has. So the protocol fee is charged at the door instead — the asker pays
+`deposit + fee`, the market is funded with the deposit, and the fee never
+enters the pot settlement pays out of. It is quoted in the 402 before anything
+is paid, and `PROTOCOL_FEE_TINYBAR` is zero unless a deployment sets it.
 
 Reports are free, so payment cannot prove authorship. An agent signs its report
 with the same Hedera key it bonded and gets paid with, over the **raw**

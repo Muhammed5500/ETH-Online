@@ -44,7 +44,14 @@ import {
 import { PublicKey } from '@hashgraph/sdk';
 import { HcsRandomSource, type HcsMessage, type HederaNetwork } from '@ethonline/hedera';
 import type { Ledger } from './ledger.js';
-import { bondTinybar, depositTinybar, DEFAULT_HBAR_PER_UNIT, unitsToTinybar } from './pricing.js';
+import {
+  bondTinybar,
+  depositTinybar,
+  DEFAULT_HBAR_PER_UNIT,
+  DEFAULT_PROTOCOL_FEE_TINYBAR,
+  marketPriceTinybar,
+  unitsToTinybar,
+} from './pricing.js';
 import { summarize } from './settlement-progress.js';
 import { verifyRegistrationSignature, verifyReportSignature } from './signatures.js';
 import { onPaymentFailure } from './payment-rollback.js';
@@ -80,6 +87,15 @@ export interface ApiConfig {
    */
   readonly minBondingWindowMs: number;
   readonly defaultParams: MarketParams;
+  /**
+   * Charged to the asker on top of the deposit, and kept.
+   *
+   * It sits OUTSIDE the settlement pot on purpose: the mechanism's honesty
+   * guarantee is a statement about the scoring payments, and a fee taken out
+   * of those would change the payoff function agents are reasoning about. This
+   * one is a price at the door, quoted in the 402 before anything is paid.
+   */
+  readonly protocolFeeTinybar: bigint;
 }
 
 export const DEFAULT_API_CONFIG: ApiConfig = {
@@ -87,6 +103,7 @@ export const DEFAULT_API_CONFIG: ApiConfig = {
   hbarPerUnit: DEFAULT_HBAR_PER_UNIT,
   bondingWindowMs: 5 * 60 * 1000,
   minBondingWindowMs: 45 * 1000,
+  protocolFeeTinybar: DEFAULT_PROTOCOL_FEE_TINYBAR,
   defaultParams: DEFAULT_PARAMS,
 };
 
@@ -234,6 +251,15 @@ export function createApp(deps: AppDeps): Api {
       network: config.network,
       markets: markets.size,
       agents: registry.size,
+      // What a default market costs to open here, split into the part the
+      // mechanism spends and the part this deployment keeps. The Ask page
+      // reads it rather than assuming a fee of zero.
+      depositTinybar: depositTinybar(
+        config.defaultParams,
+        UNIFORM_PRIOR,
+        config.hbarPerUnit,
+      ).toString(),
+      protocolFeeTinybar: config.protocolFeeTinybar.toString(),
     });
   });
 
@@ -432,7 +458,12 @@ export function createApp(deps: AppDeps): Api {
           bondingClosesAt: stored.bondingClosesAt,
           params,
           prior,
+          // `deposit` is what funds the market and is what settlement may
+          // spend. `paid` is what the asker was charged. The difference is the
+          // protocol fee, and saying both is the honest way to charge one.
           depositTinybar: deposit.toString(),
+          protocolFeeTinybar: config.protocolFeeTinybar.toString(),
+          paidTinybar: (deposit + config.protocolFeeTinybar).toString(),
           bondTinybar: bond.toString(),
         });
       } catch (e) {

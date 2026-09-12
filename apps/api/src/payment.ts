@@ -17,7 +17,12 @@ import { HTTPFacilitatorClient, type RoutesConfig } from '@x402/core/server';
 import { ExactHederaScheme } from '@x402/hedera/exact/server';
 import { HBAR_ASSET_ID, HEDERA_TESTNET_CAIP2 } from '@x402/hedera';
 import type { MarketParams } from '@ethonline/core';
-import { bondTinybar, depositTinybar, DEFAULT_RESOLVE_PRICE_TINYBAR } from './pricing.js';
+import {
+  bondTinybar,
+  DEFAULT_PROTOCOL_FEE_TINYBAR,
+  DEFAULT_RESOLVE_PRICE_TINYBAR,
+  marketPriceTinybar,
+} from './pricing.js';
 import { logRollback, withPaymentRollback, type RollbackReport } from './payment-rollback.js';
 import { resolveParams, resolvePrior } from './app.js';
 import type { MarketStore } from './store.js';
@@ -30,6 +35,8 @@ export interface PaymentGateOptions {
   readonly defaultParams: MarketParams;
   readonly hbarPerUnit: number;
   readonly resolvePriceTinybar?: bigint;
+  /** Charged to the asker on top of the deposit. Zero unless set. */
+  readonly protocolFeeTinybar?: bigint;
   /**
    * Per-request timeout for facilitator calls.
    *
@@ -93,7 +100,15 @@ export function createPaymentGate(opts: PaymentGateOptions): RequestHandler {
           const prior = safePrior(raw['prior']);
           return {
             asset: HBAR_ASSET_ID,
-            amount: depositTinybar(params, prior, opts.hbarPerUnit).toString(),
+            // deposit + protocol fee. The handler funds the market with the
+            // deposit alone; the fee stays with the treasury and never enters
+            // the pot settlement pays out of.
+            amount: marketPriceTinybar(
+              params,
+              prior,
+              opts.hbarPerUnit,
+              opts.protocolFeeTinybar ?? DEFAULT_PROTOCOL_FEE_TINYBAR,
+            ).toString(),
           };
         },
       },

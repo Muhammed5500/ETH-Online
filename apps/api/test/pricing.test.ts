@@ -8,14 +8,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_PARAMS, requiredDeposit, UNIFORM_PRIOR } from '@ethonline/core';
-import {
-  bondTinybar,
-  depositTinybar,
-  formatTinybar,
-  TINYBAR_PER_HBAR,
-  tinybarToHbar,
-  unitsToTinybar,
-} from '../src/pricing.js';
+import { TINYBAR_PER_HBAR, bondTinybar, depositTinybar, formatTinybar, marketPriceTinybar, tinybarToHbar, unitsToTinybar } from '../src/pricing.js';
 
 describe('unitsToTinybar', () => {
   it('converts whole HBAR exactly', () => {
@@ -86,5 +79,42 @@ describe('bondTinybar', () => {
 describe('formatTinybar', () => {
   it('shows both units, because demos need both', () => {
     expect(formatTinybar(100_000_000n)).toBe('1.00000000 HBAR (100000000 tinybar)');
+  });
+});
+
+describe('the protocol fee', () => {
+  const prior = UNIFORM_PRIOR;
+
+  it('is zero unless a deployment asks for one', () => {
+    expect(marketPriceTinybar(DEFAULT_PARAMS, prior)).toBe(depositTinybar(DEFAULT_PARAMS, prior));
+  });
+
+  it('is added on top of the deposit, not taken out of it', () => {
+    // The mechanism's guarantee is about the scoring pot. A fee deducted from
+    // the deposit would shrink what settlement may pay and quietly change the
+    // payoff function agents are reasoning about.
+    const fee = 10_000_000n;
+    const deposit = depositTinybar(DEFAULT_PARAMS, prior);
+    expect(marketPriceTinybar(DEFAULT_PARAMS, prior, 1, fee)).toBe(deposit + fee);
+  });
+
+  it('scales with hbarPerUnit only through the deposit', () => {
+    const fee = 5_000_000n;
+    const at1 = marketPriceTinybar(DEFAULT_PARAMS, prior, 1, fee);
+    const at2 = marketPriceTinybar(DEFAULT_PARAMS, prior, 2, fee);
+
+    // Doubling the scale doubles the deposit and leaves the fee alone — to
+    // within one tinybar, because the deposit is rounded UP at each scale
+    // rather than doubled after rounding. Rounding up is deliberate: rounding
+    // down would quote a price a fraction below the bound, and that bound is
+    // the whole of the asker's cost guarantee.
+    const doubled = (at1 - fee) * 2n;
+    const actual = at2 - fee;
+    expect(actual === doubled || actual === doubled - 1n).toBe(true);
+    expect(at2 - at1).toBeGreaterThan(0n);
+  });
+
+  it('refuses a negative fee', () => {
+    expect(() => marketPriceTinybar(DEFAULT_PARAMS, prior, 1, -1n)).toThrowError(/negative/);
   });
 });

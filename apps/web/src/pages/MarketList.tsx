@@ -1,106 +1,131 @@
 /**
  * The market list.
  *
- * What a card has to convey at a glance, in order: what was asked, what the
- * market currently believes, and how far through it is. The price is the
- * headline because it is the market's actual output — everything else on the
- * card is context for reading it.
+ * TWO GROUPS, AND THEY ARE NOT THE SAME OBJECT. A market that is still running
+ * has a price that will change; a market that has closed has an answer that
+ * never will. Showing them in one undifferentiated grid invites the reader to
+ * treat a live number as a result — the single most misleading thing this page
+ * could do. So the live ones come first, carry the accent and a beating dot,
+ * and say "current price"; the resolved ones are quieter, and their number is
+ * labelled "answer".
+ *
+ * WHAT A CARD SAYS, IN ORDER. What was asked, what the market believes, and how
+ * far through it is. The question is the largest text because it is the only
+ * part a reader cannot reconstruct from anything else on screen.
  *
  * The progress bar is `reportCount / (1/alpha)` and is capped at full rather
- * than allowed to overflow. The stopping rule is geometric, so a market can
- * and does run past its expected length; a bar showing 180% would suggest
- * something is wrong when nothing is.
+ * than allowed to overflow. The stopping rule is geometric, so a market can and
+ * does run past its expected length; a bar at 180% would suggest something is
+ * wrong when nothing is.
  */
 import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { api, type MarketView } from '../lib/api.ts';
 import { expectedLength, formatHbar, percent, relativeTime } from '../lib/format.ts';
 import { usePolling } from '../lib/usePolling.ts';
-import { Empty, ErrorBox, Spinner, StatusBadge } from '../components/ui.tsx';
+import { Empty, ErrorBox, LiveDot, Spinner, StatusBadge } from '../components/ui.tsx';
 
-function PriceDial({ market }: { market: MarketView }): ReactNode {
+function Price({ market, live }: { market: MarketView; live: boolean }): ReactNode {
   const p = market.currentPrice[1];
   const moved = market.reportCount > 0;
   return (
     <div className="shrink-0 text-right">
-      <div className={`text-2xl font-semibold tnum ${moved ? 'text-slate-100' : 'text-slate-500'}`}>
+      <div
+        className={`text-3xl font-semibold tracking-tight tnum ${
+          moved ? 'text-[var(--color-fg)]' : 'text-[var(--color-fg-faint)]'
+        }`}
+      >
         {percent(p)}
       </div>
-      <div className="text-[11px] text-slate-500">
-        {moved ? 'current price' : 'prior, no reports yet'}
+      <div className="mt-0.5 text-[11px] text-[var(--color-fg-faint)]">
+        {!moved ? 'prior, no reports yet' : live ? 'current price' : 'answer'}
       </div>
     </div>
   );
 }
 
-function MarketCard({ market }: { market: MarketView }): ReactNode {
+function Stat({ label, value }: { label: string; value: ReactNode }): ReactNode {
+  return (
+    <div>
+      <dt className="text-[11px] text-[var(--color-fg-faint)]">{label}</dt>
+      <dd className="mt-0.5 font-mono text-xs text-[var(--color-fg-muted)] tnum">{value}</dd>
+    </div>
+  );
+}
+
+function MarketCard({ market, live }: { market: MarketView; live: boolean }): ReactNode {
   const expected = expectedLength(market.params);
   const progress = Math.min(1, market.reportCount / expected);
+  const running = market.status === 'running';
 
   return (
     <Link
       to={`/m/${market.marketId}`}
-      className="block rounded-lg border border-[var(--color-edge)] bg-[var(--color-panel)] p-4 transition hover:border-slate-600"
+      className={`card card-hover block p-5 ${live ? 'border-l-2 border-l-[var(--color-accent)]' : ''}`}
     >
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            {running && <LiveDot />}
             <StatusBadge status={market.status} />
-            <span className="font-mono text-[11px] text-slate-500">{market.marketId}</span>
+            <span className="font-mono text-[11px] text-[var(--color-fg-faint)]">
+              {market.marketId}
+            </span>
           </div>
-          <p className="mt-2 text-sm leading-snug text-slate-100">{market.question}</p>
+          <p className="mt-2.5 text-[15px] leading-snug text-[var(--color-fg)]">
+            {market.question}
+          </p>
         </div>
-        <PriceDial market={market} />
+        <Price market={market} live={live} />
       </div>
 
-      <div className="mt-3 h-1 overflow-hidden rounded-full bg-slate-800">
+      <div className="mt-4 h-1 overflow-hidden rounded-full bg-[var(--color-edge)]">
         <div
-          className="h-full rounded-full bg-slate-500"
+          className={`h-full rounded-full ${live ? 'bg-[var(--color-accent)]' : 'bg-[var(--color-edge-strong)]'}`}
           style={{ width: `${progress * 100}%` }}
           title={`${market.reportCount} reports, expected length ${expected.toFixed(1)}`}
         />
       </div>
 
-      <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1 text-[11px] text-slate-500 sm:grid-cols-4">
-        <div>
-          <dt className="inline">reports </dt>
-          <dd className="inline tnum text-slate-300">
-            {market.reportCount} / ~{expected.toFixed(0)}
-          </dd>
-        </div>
-        <div>
-          <dt className="inline">pool </dt>
-          <dd className="inline tnum text-slate-300">
-            {market.bondedCount} / {market.params.minPoolSize}
-          </dd>
-        </div>
-        <div>
-          <dt className="inline">deposit </dt>
-          <dd className="inline tnum text-slate-300">{formatHbar(market.depositTinybar, 2)}</dd>
-        </div>
-        <div>
-          <dt className="inline">
-            {market.status === 'bonding' ? 'bonding closes ' : 'opened '}
-          </dt>
-          <dd className="inline tnum text-slate-300">
-            {relativeTime(
-              market.status === 'bonding' ? market.bondingClosesAt : market.createdAt,
-            )}
-          </dd>
-        </div>
+      <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-4">
+        <Stat label="reports" value={`${market.reportCount} / ~${expected.toFixed(0)}`} />
+        <Stat label="pool" value={`${market.bondedCount} / ${market.params.minPoolSize}`} />
+        <Stat label="deposit" value={formatHbar(market.depositTinybar, 2)} />
+        <Stat
+          label={market.status === 'bonding' ? 'bonding closes' : 'opened'}
+          value={relativeTime(
+            market.status === 'bonding' ? market.bondingClosesAt : market.createdAt,
+          )}
+        />
       </dl>
     </Link>
   );
 }
 
-/** Live markets first, then the record. Sorted newest-first inside each group. */
-function partition(markets: readonly MarketView[]): {
-  live: MarketView[];
-  done: MarketView[];
-} {
-  const live = markets.filter((m) => m.status === 'bonding' || m.status === 'running');
-  const done = markets.filter((m) => m.status !== 'bonding' && m.status !== 'running');
-  return { live, done };
+function SectionHeading({
+  title,
+  count,
+  note,
+}: {
+  title: string;
+  count: number;
+  note: string;
+}): ReactNode {
+  return (
+    <div className="mb-4 flex items-baseline gap-3 border-b border-[var(--color-edge)] pb-2">
+      <h2 className="text-sm font-semibold text-[var(--color-fg)]">{title}</h2>
+      <span className="rounded-full bg-[var(--color-edge)] px-2 py-0.5 font-mono text-[11px] text-[var(--color-fg-muted)] tnum">
+        {count}
+      </span>
+      <span className="text-[11px] text-[var(--color-fg-faint)]">{note}</span>
+    </div>
+  );
+}
+
+/** Live markets first, then the record. Newest first inside each group. */
+function partition(markets: readonly MarketView[]): { live: MarketView[]; done: MarketView[] } {
+  const isLive = (m: MarketView): boolean => m.status === 'bonding' || m.status === 'running';
+  return { live: markets.filter(isLive), done: markets.filter((m) => !isLive(m)) };
 }
 
 export function MarketList(): ReactNode {
@@ -115,20 +140,35 @@ export function MarketList(): ReactNode {
 
   const markets = data?.markets ?? [];
   const { live, done } = partition(markets);
+  const answered = done.filter((m) => m.reference).length;
 
   return (
-    <div className="space-y-8">
-      <header className="flex items-end justify-between gap-4">
-        <div>
-          <h1 className="text-lg font-semibold text-slate-100">Markets</h1>
-          <p className="mt-1 max-w-2xl text-sm text-slate-400">
-            Questions no oracle can settle. Agents post a bond, report in turn, and the market
-            resolves against its own last agent — nothing outside it is consulted.
+    <div className="space-y-10">
+      <header className="flex flex-wrap items-end justify-between gap-6">
+        <div className="max-w-2xl">
+          <h1 className="text-2xl font-semibold tracking-tight text-[var(--color-fg)]">
+            Questions no oracle can settle
+          </h1>
+          <p className="mt-2 text-sm leading-relaxed text-[var(--color-fg-muted)]">
+            Agents post a bond, are drawn one at a time, and report in turn. The market closes at a
+            random point and resolves against its own last agent — nothing outside it is ever
+            consulted.
           </p>
+          <div className="mt-4 flex flex-wrap gap-x-6 gap-y-1 text-[11px] text-[var(--color-fg-faint)]">
+            <span>
+              <span className="font-mono text-[var(--color-fg-muted)] tnum">{live.length}</span>{' '}
+              running now
+            </span>
+            <span>
+              <span className="font-mono text-[var(--color-fg-muted)] tnum">{answered}</span>{' '}
+              answered
+            </span>
+            <span>every report on a public Hedera topic</span>
+          </div>
         </div>
         <Link
           to="/new"
-          className="shrink-0 rounded-md bg-slate-100 px-3 py-2 text-sm font-medium text-slate-900 transition hover:bg-white"
+          className="shrink-0 rounded-md bg-[var(--color-accent)] px-4 py-2.5 text-sm font-medium text-[#04121f] transition hover:bg-[var(--color-accent-strong)]"
         >
           Ask a question
         </Link>
@@ -138,12 +178,14 @@ export function MarketList(): ReactNode {
 
       {live.length > 0 && (
         <section>
-          <h2 className="mb-3 text-xs font-medium uppercase tracking-wide text-slate-500">
-            Open — {live.length}
-          </h2>
-          <div className="grid gap-3 lg:grid-cols-2">
+          <SectionHeading
+            title="Open"
+            count={live.length}
+            note="still moving — the price here is not an answer yet"
+          />
+          <div className="grid gap-4 lg:grid-cols-2">
             {live.map((m) => (
-              <MarketCard key={m.marketId} market={m} />
+              <MarketCard key={m.marketId} market={m} live />
             ))}
           </div>
         </section>
@@ -151,12 +193,14 @@ export function MarketList(): ReactNode {
 
       {done.length > 0 && (
         <section>
-          <h2 className="mb-3 text-xs font-medium uppercase tracking-wide text-slate-500">
-            Resolved — {done.length}
-          </h2>
-          <div className="grid gap-3 lg:grid-cols-2">
+          <SectionHeading
+            title="Resolved"
+            count={done.length}
+            note="closed against the terminal agent; the price is final"
+          />
+          <div className="grid gap-4 lg:grid-cols-2">
             {done.map((m) => (
-              <MarketCard key={m.marketId} market={m} />
+              <MarketCard key={m.marketId} market={m} live={false} />
             ))}
           </div>
         </section>

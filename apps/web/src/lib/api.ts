@@ -286,7 +286,16 @@ export const api = {
   settlement: (id: string) =>
     request<SettlementView>(`/market/${encodeURIComponent(id)}/settlement`),
   agents: () => request<{ agents: AgentView[]; count: number }>('/agents'),
-  health: () => request<{ ok: boolean; network: string; markets: number; agents: number }>('/health'),
+  health: () =>
+    request<{
+      ok: boolean;
+      network: string;
+      markets: number;
+      agents: number;
+      /** Tinybar strings: what a default market costs here, split in two. */
+      depositTinybar?: string;
+      protocolFeeTinybar?: string;
+    }>('/health'),
 
   /**
    * The one paid call in this client.

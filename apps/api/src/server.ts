@@ -86,7 +86,12 @@ async function main(): Promise<void> {
   // the first paying customer absorb that is the wrong trade.
   const warm = await warmUpFacilitator(facilitatorUrl);
 
+  // What this deployment charges for asking, on top of the deposit. Zero
+  // unless set, so a run that says nothing behaves exactly as measured.
+  const protocolFeeTinybar = BigInt(readEnv(process.env, 'PROTOCOL_FEE_TINYBAR') ?? '0');
+
   const paymentGate = createPaymentGate({
+    protocolFeeTinybar,
     treasuryAccountId: treasury.accountId,
     facilitatorUrl,
     facilitatorTimeoutMs: Number(
@@ -124,7 +129,7 @@ async function main(): Promise<void> {
     ledger: hederaLedger(client),
     markets,
     paymentGate,
-    config: { network: cfg.network, hbarPerUnit, minBondingWindowMs },
+    config: { network: cfg.network, hbarPerUnit, minBondingWindowMs, protocolFeeTinybar },
     ...(verifyEnsName ? { verifyEnsName } : {}),
   });
 
@@ -265,7 +270,12 @@ async function main(): Promise<void> {
       console.log('                 Reads and agent registration still work.');
     }
     console.log('');
-    console.log(`  Open a market: ${formatTinybar(deposit)}  (default params)`);
+    console.log(
+    `  Open a market: ${formatTinybar(deposit + protocolFeeTinybar)}  (default params)` +
+      (protocolFeeTinybar > 0n
+        ? `  = ${formatTinybar(deposit)} deposit + ${formatTinybar(protocolFeeTinybar)} protocol fee`
+        : ''),
+  );
     console.log(`  Post a bond:   ${formatTinybar(bond)}`);
     console.log('='.repeat(60));
     console.log(

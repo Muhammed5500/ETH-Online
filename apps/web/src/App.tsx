@@ -36,7 +36,7 @@ function WalletButton(): ReactNode {
     return (
       <span
         title="Set VITE_WALLETCONNECT_PROJECT_ID in .env — pairing goes through WalletConnect's relay, which needs a project id."
-        className="rounded px-2.5 py-1.5 text-sm text-slate-600"
+        className="rounded px-2.5 py-1.5 text-sm text-[var(--color-fg-faint)]"
       >
         Wallet unconfigured
       </span>
@@ -48,7 +48,7 @@ function WalletButton(): ReactNode {
       <button
         onClick={() => void wallet.disconnect()}
         title="Disconnect"
-        className="rounded border border-[var(--color-edge)] px-2.5 py-1.5 font-mono text-xs text-slate-300 transition hover:border-slate-600 hover:text-slate-100"
+        className="rounded-md border border-[var(--color-edge)] px-2.5 py-1.5 font-mono text-xs text-[var(--color-fg-muted)] transition hover:border-[var(--color-edge-strong)] hover:text-[var(--color-fg)]"
       >
         {wallet.accountId}
       </button>
@@ -59,7 +59,7 @@ function WalletButton(): ReactNode {
     <button
       onClick={() => void wallet.connect()}
       disabled={wallet.status === 'connecting'}
-      className="rounded bg-slate-100 px-2.5 py-1.5 text-sm font-medium text-slate-900 transition hover:bg-white disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-500"
+      className="rounded-md border border-[var(--color-accent)] px-3 py-1.5 text-sm font-medium text-[var(--color-accent-strong)] transition hover:bg-[var(--color-accent-soft)] disabled:cursor-not-allowed disabled:border-[var(--color-edge)] disabled:text-[var(--color-fg-faint)]"
     >
       {wallet.status === 'connecting' ? 'Connecting…' : 'Connect wallet'}
     </button>
@@ -80,13 +80,13 @@ function NotFound(): ReactNode {
 export function App(): ReactNode {
   return (
     <div className="min-h-full">
-      <header className="border-b border-[var(--color-edge)]">
+      <header className="sticky top-0 z-20 border-b border-[var(--color-edge)] bg-[color-mix(in_srgb,var(--color-ink)_85%,transparent)] backdrop-blur">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-5 py-3">
           <Link to="/" className="group flex items-baseline gap-2">
-            <span className="text-sm font-semibold tracking-tight text-slate-100">
-              self-resolving
+            <span className="text-sm font-semibold tracking-tight text-[var(--color-fg)]">
+              self&#8209;resolving
             </span>
-            <span className="text-[11px] text-slate-500 transition group-hover:text-slate-400">
+            <span className="hidden text-[11px] text-[var(--color-fg-faint)] transition group-hover:text-[var(--color-fg-muted)] sm:inline">
               prediction markets for unverifiable outcomes
             </span>
           </Link>
@@ -101,7 +101,7 @@ export function App(): ReactNode {
         </div>
       </header>
 
-      <main className="mx-auto max-w-6xl px-5 py-8">
+      <main className="mx-auto max-w-6xl px-5 py-10">
         <Routes>
           <Route path="/" element={<MarketList />} />
           <Route path="/new" element={<NewMarket />} />
@@ -112,11 +112,11 @@ export function App(): ReactNode {
       </main>
 
       <footer className="mx-auto max-w-6xl px-5 pb-10 pt-4">
-        <p className="text-[11px] leading-relaxed text-slate-600">
+        <p className="text-[11px] leading-relaxed text-[var(--color-fg-faint)]">
           Mechanism: Srinivasan, Karger &amp; Chen,{' '}
           <a
             href="https://arxiv.org/abs/2306.04305"
-            className="underline hover:text-slate-400"
+            className="underline hover:text-[var(--color-fg-muted)]"
             target="_blank"
             rel="noreferrer"
           >

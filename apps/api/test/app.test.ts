@@ -185,6 +185,43 @@ describe('POST /agents/register — open to anyone', () => {
   });
 });
 
+describe('the protocol fee', () => {
+  it('is charged on top and does not fund the market', async () => {
+    const fee = 25_000_000n;
+    const charged = createApp({ ledger, config: { protocolFeeTinybar: fee } });
+    const res = await request(charged.app)
+      .post('/market')
+      .send({ question: 'Is this protocol growth organic?' })
+      .expect(201);
+
+    const deposit = BigInt(res.body.depositTinybar);
+    expect(BigInt(res.body.protocolFeeTinybar)).toBe(fee);
+    expect(BigInt(res.body.paidTinybar)).toBe(deposit + fee);
+
+    // The market is funded with the deposit alone. If the fee leaked into the
+    // pot, settlement would try to hand it back to the asker and this
+    // deployment would earn nothing.
+    const stored = charged.markets.get(res.body.marketId)!;
+    expect(stored.depositTinybar).toBe(deposit);
+  });
+
+  it('changes nothing when it is zero', async () => {
+    const res = await request(api.app)
+      .post('/market')
+      .send({ question: 'Is this protocol growth organic?' })
+      .expect(201);
+    expect(res.body.protocolFeeTinybar).toBe('0');
+    expect(res.body.paidTinybar).toBe(res.body.depositTinybar);
+  });
+
+  it('is advertised on /health so the page does not have to assume', async () => {
+    const charged = createApp({ ledger, config: { protocolFeeTinybar: 25_000_000n } });
+    const res = await request(charged.app).get('/health').expect(200);
+    expect(res.body.protocolFeeTinybar).toBe('25000000');
+    expect(BigInt(res.body.depositTinybar)).toBeGreaterThan(0n);
+  });
+});
+
 describe('POST /market', () => {
   it('creates a topic, writes market-open, and returns the deposit it charged', async () => {
     const res = await request(api.app)

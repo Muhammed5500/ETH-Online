@@ -5,7 +5,7 @@
  * a directory of one-component files would be more filing than code.
  */
 import type { ReactNode } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import type { MarketStatus } from '../lib/api.ts';
 import { sliceColor } from '../lib/format.ts';
 
@@ -77,10 +77,10 @@ export function Panel({
   aside?: ReactNode;
 }): ReactNode {
   return (
-    <section className="rounded-lg border border-[var(--color-edge)] bg-[var(--color-panel)]">
+    <section className="card">
       {title && (
         <header className="flex items-center justify-between border-b border-[var(--color-edge)] px-4 py-2.5">
-          <h2 className="text-sm font-semibold text-slate-200">{title}</h2>
+          <h2 className="text-sm font-semibold text-[var(--color-fg)]">{title}</h2>
           {aside}
         </header>
       )}
@@ -153,16 +153,64 @@ export function ErrorBox({
 }
 
 export function Empty({ children }: { children: ReactNode }): ReactNode {
-  return <p className="py-8 text-center text-sm text-slate-500">{children}</p>;
+  return <p className="py-8 text-center text-sm text-[var(--color-fg-faint)]">{children}</p>;
 }
 
+/**
+ * A nav link that says where you are.
+ *
+ * The active tab gets the accent and a filled background rather than only a
+ * brighter grey: on a projector a grey-on-grey difference disappears, and
+ * "which page am I on" is the one thing a viewer should never have to work out.
+ */
 export function NavLinkish({ to, children }: { to: string; children: ReactNode }): ReactNode {
+  const { pathname } = useLocation();
+  const active = to === '/' ? pathname === '/' : pathname.startsWith(to);
   return (
     <Link
       to={to}
-      className="rounded px-2.5 py-1.5 text-sm text-slate-400 transition hover:bg-white/5 hover:text-slate-100"
+      aria-current={active ? 'page' : undefined}
+      className={`rounded-md px-3 py-1.5 text-sm transition ${
+        active
+          ? 'bg-[var(--color-accent-soft)] text-[var(--color-accent-strong)]'
+          : 'text-[var(--color-fg-muted)] hover:bg-white/5 hover:text-[var(--color-fg)]'
+      }`}
     >
       {children}
     </Link>
+  );
+}
+
+/** The one filled button on a page: asking a question, connecting a wallet. */
+export function PrimaryButton({
+  onClick,
+  children,
+  disabled,
+  title,
+}: {
+  onClick?: () => void;
+  children: ReactNode;
+  disabled?: boolean;
+  title?: string;
+}): ReactNode {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      className="rounded-md bg-[var(--color-accent)] px-4 py-2 text-sm font-medium text-[#04121f] transition hover:bg-[var(--color-accent-strong)] disabled:cursor-not-allowed disabled:bg-[var(--color-edge-strong)] disabled:text-[var(--color-fg-faint)]"
+    >
+      {children}
+    </button>
+  );
+}
+
+/** A running market's heartbeat. The only moving thing on the page. */
+export function LiveDot(): ReactNode {
+  return (
+    <span
+      aria-hidden
+      className="live-dot inline-block h-1.5 w-1.5 rounded-full bg-emerald-400"
+    />
   );
 }
