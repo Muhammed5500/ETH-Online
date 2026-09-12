@@ -52,7 +52,16 @@ const WEB_DIST = resolve(HERE, '..', '..', 'web', 'dist');
  */
 const API_PREFIXES = ['/market', '/markets', '/agents', '/health', '/resolve'];
 
-const PORT = Number(readEnv(process.env, 'API_PORT') ?? 4020);
+/**
+ * The port to listen on.
+ *
+ * `PORT` first, because that is what a host injects: Railway, Fly, Render and
+ * every other platform assign a port at boot and route to it. A server that
+ * insists on its own port there binds something nobody is talking to and looks
+ * healthy while answering nothing. `API_PORT` stays for local runs where two
+ * copies need different ports.
+ */
+const PORT = Number(readEnv(process.env, 'PORT') ?? readEnv(process.env, 'API_PORT') ?? 4020);
 
 async function main(): Promise<void> {
   const cfg = hederaConfigFromEnv();

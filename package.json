@@ -31,7 +31,9 @@
     "ens:spike": "tsx scripts/ens-spike.ts",
     "ens:mint": "tsx scripts/ens-mint.ts",
     "ens:score": "tsx scripts/ens-score.ts",
-    "ens:read": "tsx scripts/ens-read.ts"
+    "ens:read": "tsx scripts/ens-read.ts",
+    "start:all": "tsx scripts/start-all.ts",
+    "start": "tsx scripts/start-all.ts"
   },
   "devDependencies": {
     "@types/express": "^5.0.6",
