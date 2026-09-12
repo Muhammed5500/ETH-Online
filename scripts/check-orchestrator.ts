@@ -26,6 +26,10 @@ import {
   HEDERA_TESTNET_CAIP2,
   PrivateKey,
 } from '@x402/hedera';
+// The x402 package re-exports a PrivateKey from @hiero-ledger; signatures go
+// through @hashgraph's, and the two types are not interchangeable. Imported
+// under its own name so the difference is visible at the call site.
+import { PrivateKey as HederaKey } from '@hashgraph/sdk';
 import { DEFAULT_PARAMS } from '@ethonline/core';
 import {
   createHederaClient,
@@ -192,7 +196,7 @@ async function main(): Promise<void> {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           ...claim,
-          signature: signRegistration(PrivateKey.fromStringECDSA(a.privateKey), claim),
+          signature: signRegistration(HederaKey.fromStringECDSA(a.privateKey), claim),
         }),
       });
       if (res.status !== 201) throw new Error(`Registering ${a.agentId} failed: ${res.status}`);

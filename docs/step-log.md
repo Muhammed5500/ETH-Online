@@ -3430,3 +3430,124 @@ sorunu.
 **Dilimler hala beyan.** Agent `sliceIds` alanina ne yazarsa o kaydediliyor ve
 hicbir sey gercekten sorgu yaptigini kanitlamiyor. Paper bunu acikca gelecek
 calisma olarak isaretliyor.
+
+## ADIM 23-26 — ENSv2: agent kimligi ve zincirde sicil
+
+ENS bitti. Sirasiyla ne yapildi, neyin zincirde kaniti var.
+
+### Kaynak: dokuman degil, kontratlar
+
+ENS'in doküman sayfasinin verdigi Sepolia adresleri zincirdekiyle TUTMUYORDU.
+Adresler `ensdomains/contracts-v2` reposunun kendi deployment dosyalarindan
+alindi ve her biri icin `eth_getCode` ile bytecode dogrulandi. Rol sabitleri de
+`RegistryRolesLib.sol` ve `PermissionedResolverLib.sol` kaynagindan okundu.
+
+Yanlis adrese islem gondermek "izin yok" gibi gorunen bir hata uretir ve
+saatler yer.
+
+### ADIM 23 — rol semasi (docs/ens-role-schema.md)
+
+Kod yazilmadan bitirildi, cunku isim bazinda admin rolleri YALNIZ mint aninda
+verilebiliyor. En kritik karar: agent'a registry tarafinda `roleBitmap = 0`.
+Ozellikle `ROLE_SET_RESOLVER` verilmiyor — verilseydi agent resolver'i kendi
+kontrolundeki bir kontrata cevirip kendi skorunu yazardi ve butun iddia
+coker.
+
+Kilit bulgu: `PermissionedResolver` yetkiyi `resource(namehash, partHash(key))`
+ile kapsiyor, yani ANAHTAR BAZINDA. Iki ayri resolver ya da ayri isim dali
+gerekmedi.
+
+### ADIM 24 — parent, registry, resolver
+
+```
+unverifiable.eth            8.000021 test USDC (ETH degil: register() paymentToken aliyor)
+  UserRegistry proxy        0x507005f52e5F9C7ca9270E4045c9f6B53A9950Ef
+  PermissionedResolver proxy 0xe45457d65a6641f2d4ce6487fc540eab81c01d6e
+```
+
+TUZAK: factory'ye islemi gonderip SONRA donus degerini okumak icin simule
+ettim. Islem basariliydi ama salt tukendigi icin simulasyon revert etti ve
+deploy edilen proxy'nin adresi kayboldu; islemin log'larindan kurtarildi.
+Dogru sira: once simule et, o istegi gonder. Hem adres kaybolmuyor hem revert
+edecek islem icin gas odenmiyor.
+
+### Sema dogrulamasi — 20 isimden once 1 isim
+
+`pnpm ens:spike`, 7/7 zincirde gecti:
+
+```
+[PASS] Ismin sahibi agent'in kendi Hedera anahtari
+[PASS] Expiry 90 gun
+[PASS] Agent kendi resolver'ini degistiremiyor      revert
+[PASS] Agent ismi devredemiyor                      revert
+[PASS] Agent kendi description'ini yazabiliyor      0x850add51...
+[PASS] Yazdigi zincirden geri okunuyor
+[PASS] Agent kendi score.net'ini yazamiyor          revert
+[PASS] Orchestrator score.net'i yazabiliyor         0xd7c865b1...
+```
+
+TUZAK: simule edilmis istek baska cuzdanla gonderilemiyor. Agent'in kendi
+yazma denemesi "Invalid parameters" verdi; sebep imza degil, simulasyonun
+urettigi istegin simule edildigi adresi tasimasi. Izin sorunu gibi okunuyor,
+degil.
+
+### ADIM 25 — 20 subname
+
+Her isim, agent'in Hedera anahtarindan turetilen EVM adresine mint edildi.
+Ayni anahtar Hedera'da bond oduyor, HCS'e rapor imzaliyor, Sepolia'da ismi
+kontrol ediyor. Kopru yok, eslestirme tablosu yok.
+
+Mint basina iki islem: register, sonra multicall (5 anahtar bazinda yetki + 2
+kayit). Yediye bir yerine ikiye bir; 140 islem yerine 40.
+
+### ADIM 26 — sicil yazici
+
+Settlement biter bitmez sunucu, o markete katilan her agent'in sicilini kendi
+ENS ismine yaziyor. Atesle-unut: para coktan hareket etti, bu dipnot, ve yavas
+bir Sepolia bir sonraki marketi bekletmemeli. Sayilar mutlak oldugu icin
+basarisiz bir yazimi bir sonraki duzeltiyor.
+
+Canli kosu: 6 raporluk market, 16 kayit yazildi, 0 hata.
+
+```
+agent-04.unverifiable.eth
+  score.markets 1  score.reports 1  score.reference 1  score.net 0.100000
+  hedera.account 0.0.10455281  slices bridge
+```
+
+### Kayit artik ismi zincirden dogruluyor
+
+Anlasilan A secenegi: isim zorunlu degil, ama beyan edilirse Sepolia'dan
+kontrol ediliyor — ismin sahibi, kaydi imzalayan ANAHTARIN turettigi adres mi?
+Imza "bu ismi iddia ediyorum" der, kayit defteri "bu isim benim" der; ikincisi
+gosterilmeye deger olan.
+
+Canli dogrulama:
+
+```
+20/20 agent ismini dogrulatarak kaydoldu
+baskasinin ismiyle kayit -> 401
+  "agent-01.unverifiable.eth belongs to 0x41D6...F573, not to 0x1fd5...790e"
+```
+
+Dogrulayici enjekte ediliyor: birim testleri stub veriyor, sunucu Sepolia'ya
+bakan okuyucuyu veriyor. Dogrulayicisi olmayan bir dagitim ENS ismini
+tamamen reddediyor — kontrol edemedigi bir ismi gostermektense hic
+gostermemek dogru.
+
+### Okuma yolu
+
+UniversalResolver uzerinden: `.eth` -> parent -> kendi registry'miz -> kendi
+resolver'imiz. Kendi resolver adresimize kestirmeden gitmek daha hizli olurdu
+ve hicbir sey kanitlamazdi — kendi veritabanini okuyan bir uygulama olurdu.
+
+### Maliyet
+
+0.0998 ETH ile baslandi, 0.0787 kaldi. Her sey (isim, iki deploy, spike, 20
+mint, 16 sicil yazimi) 0.021 Sepolia ETH.
+
+### Kalan
+
+Agent'lar kendi `description`'larini yazmiyor, cunku 20 adrese gas gondermek
+gerekirdi. spike-01 bunu bir kez yapti ve kanit olarak duruyor: profil
+yazilabiliyor, skor yazilamiyor.

@@ -53,17 +53,27 @@ function AgentCard({ agent }: { agent: AgentView }): ReactNode {
 
   return (
     <article className="rounded-lg border border-[var(--color-edge)] bg-[var(--color-panel)] p-4">
-      <header className="flex items-baseline justify-between gap-3">
-        <h3 className="font-mono text-sm font-semibold text-slate-100">{agent.agentId}</h3>
-        <a
-          href={hashscan('testnet', 'account', agent.accountId)}
-          target="_blank"
-          rel="noreferrer"
-          className="font-mono text-[11px] text-slate-500 underline-offset-2 hover:text-slate-300 hover:underline"
-          title="This agent's own Hedera account. It pays its bonds from here and is paid back into it."
-        >
-          {agent.accountId}
-        </a>
+      <header>
+        <div className="flex items-baseline justify-between gap-3">
+          <h3 className="font-mono text-sm font-semibold text-slate-100">{agent.agentId}</h3>
+          <a
+            href={hashscan('testnet', 'account', agent.accountId)}
+            target="_blank"
+            rel="noreferrer"
+            className="font-mono text-[11px] text-slate-500 underline-offset-2 hover:text-slate-300 hover:underline"
+            title="This agent's own Hedera account. It pays its bonds from here and is paid back into it."
+          >
+            {agent.accountId}
+          </a>
+        </div>
+        {agent.ensName && (
+          <p
+            className="mt-1 font-mono text-[11px] text-sky-300/80"
+            title="An ENSv2 name on Sepolia, owned by the address this agent's Hedera key derives. The server checked that against the registry before accepting it — the same key signs its reports and pays its bonds."
+          >
+            {agent.ensName}
+          </p>
+        )}
       </header>
 
       <div className="mt-3 flex flex-wrap gap-1.5" title="The data slices this agent reads. No two agents in the pool read the same set.">
@@ -117,6 +127,13 @@ function AgentCard({ agent }: { agent: AgentView }): ReactNode {
         </span>
         <span>registered {relativeTime(agent.registeredAt)}</span>
       </footer>
+
+      {agent.ensName && (
+        <p className="mt-2 text-[11px] leading-snug text-slate-600">
+          The numbers above are also published on this name, written by the orchestrator. The
+          agent owns the name and still cannot edit them.
+        </p>
+      )}
     </article>
   );
 }
@@ -130,6 +147,7 @@ export function Directory(): ReactNode {
   const agents = data?.agents ?? [];
   const distinct = new Set(agents.map((a) => [...(a.sliceIds ?? [])].sort().join('+'))).size;
   const withSlices = agents.filter((a) => (a.sliceIds ?? []).length > 0).length;
+  const named = agents.filter((a) => !!a.ensName).length;
 
   return (
     <div className="space-y-6">
@@ -161,6 +179,21 @@ export function Directory(): ReactNode {
               {distinct === withSlices && withSlices > 0
                 ? 'no two agents read the same set'
                 : 'two agents share a subset'}
+            </div>
+          </div>
+        </div>
+        <div className="mt-4 grid gap-4 border-t border-[var(--color-edge)] pt-4 sm:grid-cols-3">
+          <div>
+            <div className="text-xs text-slate-500">names verified on Sepolia</div>
+            <div className="mt-0.5 font-mono text-2xl text-slate-100 tnum">
+              {named}
+              <span className="ml-1 text-sm text-slate-500">/ {agents.length}</span>
+            </div>
+          </div>
+          <div className="sm:col-span-2">
+            <div className="text-xs text-slate-500">what the name proves</div>
+            <div className="mt-0.5 text-sm text-slate-300">
+              the key that signs an agent&apos;s reports owns its name
             </div>
           </div>
         </div>

@@ -15,7 +15,7 @@
  * Polling stops on a settled or cancelled market: nothing more can happen, and
  * the API is the same process the orchestrator runs in.
  */
-import { useState, type ReactNode } from 'react';
+import { useState, type ReactNode, useMemo } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import {
   api,
@@ -55,9 +55,12 @@ function Move({ from, to }: { from: number; to: number }): ReactNode {
 function ReportCard({
   report,
   isReference,
+  ensName,
 }: {
   report: ReportView;
   isReference: boolean;
+  /** The agent's ENSv2 name, when its key has proven it owns one. */
+  ensName?: string;
 }): ReactNode {
   const [open, setOpen] = useState(false);
 
@@ -73,7 +76,12 @@ function ReportCard({
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <span className="font-mono text-[11px] text-slate-500">#{report.position}</span>
-            <span className="font-mono text-sm text-slate-100">{report.agentId}</span>
+            <span
+              className="font-mono text-sm text-slate-100"
+              title={ensName ? `${ensName} — the same key signed this report` : undefined}
+            >
+              {ensName ?? report.agentId}
+            </span>
             {isReference && (
               <span className="rounded bg-violet-500/15 px-1.5 py-0.5 text-[10px] font-medium text-violet-300 ring-1 ring-inset ring-violet-500/30">
                 reference
@@ -229,6 +237,13 @@ export function Market(): ReactNode {
   const { id = '' } = useParams();
 
   const market = usePolling(() => api.market(id), [id], { intervalMs: 2000 });
+  // The directory changes far more slowly than a running market, so it is
+  // polled lazily and only to put a name on each report.
+  const directory = usePolling(() => api.agents(), [], { intervalMs: 60_000 });
+  const ensNames = useMemo(
+    () => new Map((directory.data?.agents ?? []).map((a) => [a.agentId, a.ensName])),
+    [directory.data],
+  );
   const done = isTerminal(market.data?.status);
 
   const reports = usePolling(() => api.reports(id), [id], {
@@ -324,6 +339,7 @@ export function Market(): ReactNode {
                         key={r.position}
                         report={r}
                         isReference={isClosed && r.position === lastPosition}
+                        {...(ensNames.get(r.agentId) ? { ensName: ensNames.get(r.agentId)! } : {})}
                       />
                     ))}
                   </ul>

@@ -17,6 +17,9 @@ importers:
       '@ethonline/core':
         specifier: workspace:*
         version: link:packages/core
+      '@ethonline/ens':
+        specifier: workspace:*
+        version: link:packages/ens
       '@ethonline/env':
         specifier: workspace:*
         version: link:packages/env
@@ -38,6 +41,9 @@ importers:
       express:
         specifier: ^5.2.1
         version: 5.2.1
+      viem:
+        specifier: 2.56.3
+        version: 2.56.3(typescript@5.9.3)(zod@3.25.76)
     devDependencies:
       '@types/express':
         specifier: ^5.0.6
@@ -209,6 +215,9 @@ importers:
       '@ethonline/core':
         specifier: workspace:*
         version: link:../core
+      viem:
+        specifier: ^2.56.3
+        version: 2.56.3(typescript@5.9.3)(zod@3.25.76)
 
   packages/env:
     dependencies:

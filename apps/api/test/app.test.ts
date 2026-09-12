@@ -134,6 +134,51 @@ describe('POST /agents/register — open to anyone', () => {
       .expect(401);
   });
 
+  it('refuses an ENS name when nothing can check it', async () => {
+    // Displaying a name we cannot verify would put an unearned identity on an
+    // agent card, which is worse than showing no name at all.
+    const agent = makeTestAgent('agent-09');
+    await request(api.app)
+      .post('/agents/register')
+      .send({ ...agent.registration(), ensName: 'agent-09.unverifiable.eth' })
+      .expect(400);
+  });
+
+  it('refuses an ENS name owned by somebody else', async () => {
+    const checked = createApp({
+      ledger,
+      verifyEnsName: async () => ({ ok: false, reason: 'it belongs to 0xdead' }),
+    });
+    const agent = makeTestAgent('agent-09');
+    const res = await request(checked.app)
+      .post('/agents/register')
+      .send({ ...agent.registration(), ensName: 'agent-09.unverifiable.eth' })
+      .expect(401);
+    expect(res.body.detail).toContain('0xdead');
+    expect(checked.registry.size).toBe(0);
+  });
+
+  it('keeps an ENS name the agent really owns', async () => {
+    // The verifier is handed the address the registering PUBLIC KEY derives,
+    // not one the caller supplied: an agent can only claim what its own key
+    // controls.
+    const seen: string[] = [];
+    const checked = createApp({
+      ledger,
+      verifyEnsName: async (name, owner) => {
+        seen.push(`${name}|${owner}`);
+        return { ok: true };
+      },
+    });
+    const agent = makeTestAgent('agent-09');
+    const res = await request(checked.app)
+      .post('/agents/register')
+      .send({ ...agent.registration(), ensName: 'agent-09.unverifiable.eth' })
+      .expect(201);
+    expect(res.body.agent.ensName).toBe('agent-09.unverifiable.eth');
+    expect(seen[0]?.startsWith('agent-09.unverifiable.eth|0x')).toBe(true);
+  });
+
   it('rejects an incomplete registration', async () => {
     await request(api.app).post('/agents/register').send({ agentId: 'x' }).expect(400);
     await request(api.app).post('/agents/register').send({}).expect(400);

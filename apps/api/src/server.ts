@@ -30,7 +30,15 @@ import {
   warmUpFacilitator,
 } from './payment.js';
 import { MarketStore, type StoredMarket } from './store.js';
+import { agentRecords, recordFor } from './reputation.js';
 import { formatTinybar, depositTinybar, bondTinybar } from './pricing.js';
+import {
+  agentEnsName,
+  formatAgentRecord,
+  orchestratorSigner,
+  verifyEnsOwnership,
+  writeAgentRecord,
+} from '@ethonline/ens';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const WEB_DIST = resolve(HERE, '..', '..', 'web', 'dist');
@@ -87,11 +95,28 @@ async function main(): Promise<void> {
     readEnv(process.env, 'MIN_BONDING_WINDOW_MS') ?? DEFAULT_API_CONFIG.minBondingWindowMs,
   );
 
+  // ENS wiring, when this deployment has a registry. An agent may register a
+  // name it owns; the check is a read against Sepolia, so it needs no key and
+  // costs nothing.
+  const ensParentName = readEnv(process.env, 'ENS_PARENT_NAME');
+  const ensRegistry = readEnv(process.env, 'ENS_USER_REGISTRY_ADDRESS');
+  const verifyEnsName =
+    ensParentName && ensRegistry
+      ? async (name: string, expectedOwner: string) =>
+          verifyEnsOwnership(
+            name,
+            expectedOwner as `0x${string}`,
+            ensParentName,
+            ensRegistry as `0x${string}`,
+          )
+      : undefined;
+
   const { app, config, registry } = createApp({
     ledger: hederaLedger(client),
     markets,
     paymentGate,
     config: { network: cfg.network, hbarPerUnit, minBondingWindowMs },
+    ...(verifyEnsName ? { verifyEnsName } : {}),
   });
 
   // ---- the thing that actually runs a market ----------------------------
@@ -143,11 +168,57 @@ async function main(): Promise<void> {
     }
   };
 
+  // ---- publishing the record to ENS -------------------------------------
+  //
+  // After a settlement, every agent that played gets its counted record
+  // written onto its own ENS name. Deliberately fire-and-forget: the money has
+  // already moved, this is the footnote, and a slow or unreachable Sepolia must
+  // never hold up the next market. Counts are absolute rather than
+  // incremental, so a write that fails is simply corrected by the next one.
+  const ensParent = readEnv(process.env, 'ENS_PARENT_NAME');
+  const ensResolver = readEnv(process.env, 'ENS_RESOLVER_ADDRESS');
+  const publishRecords = (marketId: string): void => {
+    if (!ensParent || !ensResolver) return;
+    void (async () => {
+      try {
+        const stored = markets.get(marketId);
+        if (!stored) return;
+        const counted = agentRecords(markets);
+        const signer = orchestratorSigner();
+        // Only the agents in THIS market: republishing twenty records after
+        // every settlement would spend gas on names whose counts did not move.
+        for (const agentId of stored.bonds.keys()) {
+          const record = recordFor(counted, agentId);
+          if (record.bonded === 0 && record.reported === 0) continue;
+          const name = agentEnsName(agentId, ensParent);
+          const result = await writeAgentRecord(
+            signer,
+            ensResolver as `0x${string}`,
+            name,
+            formatAgentRecord(record),
+          );
+          console.log(
+            result.ok
+              ? `  [ens-published] ${name} ${result.txHash ?? ''}`
+              : `  [ens-failed] ${name}: ${result.error ?? 'unknown'}`,
+          );
+        }
+      } catch (e) {
+        console.warn(`  [ens-failed] ${marketId}: ${(e as Error).message}`);
+      }
+    })();
+  };
+
   const runner = new MarketRunner({
     markets,
     orchestrator,
     refund,
-    onEvent: (event, detail) => console.log(`  [${event}]`, JSON.stringify(detail)),
+    onEvent: (event, detail) => {
+      console.log(`  [${event}]`, JSON.stringify(detail));
+      if (event === 'runner-settled' && typeof detail['marketId'] === 'string') {
+        publishRecords(detail['marketId']);
+      }
+    },
   });
   runner.start(Number(readEnv(process.env, 'RUNNER_INTERVAL_MS') ?? 3000));
 
@@ -196,6 +267,9 @@ async function main(): Promise<void> {
     );
     console.log(
       `  Bonding:       open to new agents for at least ${Math.round(minBondingWindowMs / 1000)}s per market`,
+    );
+    console.log(
+      `  ENS:           ${ensParent && ensResolver ? `publishing records under ${ensParent}` : 'not configured, records stay off chain'}`,
     );
     console.log('\n  Paid:   POST /market, POST /market/:id/bond, POST /resolve');
     console.log('  Signed: POST /market/:id/report');

@@ -40,6 +40,10 @@ import {
   HEDERA_TESTNET_CAIP2,
   PrivateKey,
 } from '@x402/hedera';
+// The x402 package re-exports a PrivateKey from @hiero-ledger; signatures go
+// through @hashgraph's, and the two types are not interchangeable. Imported
+// under its own name so the difference is visible at the call site.
+import { PrivateKey as HederaKey } from '@hashgraph/sdk';
 import { createGatewayFromEnv, questionTargetsFromEnv, readEnv } from '@ethonline/graph';
 import { parseAccountsFile } from '@ethonline/hedera';
 import {
@@ -236,12 +240,17 @@ async function main(): Promise<void> {
         sliceIds: config.sliceIds,
         issuedAt: Date.now(),
       };
+      // The name this agent's key owns on Sepolia. Not part of the signed
+      // claim on purpose: the API checks it against the registry rather than
+      // taking our word for it, which is the stronger of the two.
+      const ensParent = readEnv(process.env, 'ENS_PARENT_NAME');
       const res = await fetch(`${API_URL}/agents/register`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           ...claim,
-          signature: signRegistration(PrivateKey.fromStringECDSA(config.privateKey), claim),
+          ...(ensParent ? { ensName: `${config.id}.${ensParent}` } : {}),
+          signature: signRegistration(HederaKey.fromStringECDSA(config.privateKey), claim),
         }),
       });
       status = res.ok ? 'registered' : `not registered (${res.status})`;

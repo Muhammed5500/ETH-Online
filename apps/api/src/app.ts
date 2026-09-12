@@ -41,6 +41,7 @@ import {
   type Belief,
   type MarketParams,
 } from '@ethonline/core';
+import { PublicKey } from '@hashgraph/sdk';
 import { HcsRandomSource, type HcsMessage, type HederaNetwork } from '@ethonline/hedera';
 import type { Ledger } from './ledger.js';
 import { bondTinybar, depositTinybar, DEFAULT_HBAR_PER_UNIT, unitsToTinybar } from './pricing.js';
@@ -89,6 +90,20 @@ export const DEFAULT_API_CONFIG: ApiConfig = {
   defaultParams: DEFAULT_PARAMS,
 };
 
+/**
+ * Checks that an agent registering an ENS name actually holds it.
+ *
+ * Injected rather than imported so `createApp` still reaches for nothing: the
+ * unit suite hands it a stub, and `server.ts` hands it a reader pointed at
+ * Sepolia. A deployment with no verifier refuses ENS names outright rather
+ * than displaying one it cannot check — an unearned name on an agent card is
+ * worse than no name at all.
+ */
+export type EnsVerifier = (
+  name: string,
+  expectedOwner: string,
+) => Promise<{ ok: boolean; reason?: string }>;
+
 export interface AppDeps {
   readonly ledger: Ledger;
   readonly registry?: AgentRegistry;
@@ -96,6 +111,7 @@ export interface AppDeps {
   readonly config?: Partial<ApiConfig>;
   /** x402 middleware in production; omitted in unit tests. */
   readonly paymentGate?: RequestHandler;
+  readonly verifyEnsName?: EnsVerifier;
   readonly now?: () => number;
 }
 
@@ -273,12 +289,48 @@ export function createApp(deps: AppDeps): Api {
     );
     if (!proof.ok) return fail(res, 401, 'Registration is not signed by its own key', proof.reason);
 
-    try {
-      const saved = registry.register(agent);
-      return void res.status(201).json({ agent: saved, agentCount: registry.size });
-    } catch (e) {
-      return fail(res, 409, 'Registration conflict', (e as Error).message);
-    }
+    // An ENS name is a claim about a second chain, so it is checked against
+    // that chain rather than against the signature above.
+    //
+    // The signature proves the key; the registry lookup proves the name is
+    // owned by the address that key derives. Signing the name as well would
+    // add nothing: a signature says "I claim this name", the lookup says "the
+    // name is mine", and only the second one is worth displaying.
+    void (async () => {
+      if (agent.ensName) {
+        if (!deps.verifyEnsName) {
+          return fail(
+            res,
+            400,
+            'ENS names cannot be verified here',
+            'This deployment has no ENS reader configured, so it will not display a name it ' +
+              'cannot check. Register without ensName.',
+          );
+        }
+        let expectedOwner: string;
+        try {
+          expectedOwner = `0x${PublicKey.fromString(agent.publicKey).toEvmAddress()}`;
+        } catch (e) {
+          return fail(res, 400, 'Invalid registration', `Public key is unusable: ${(e as Error).message}`);
+        }
+        const check = await deps.verifyEnsName(agent.ensName, expectedOwner);
+        if (!check.ok) {
+          return fail(
+            res,
+            401,
+            'That ENS name is not yours',
+            check.reason ?? `${agent.ensName} is not owned by ${expectedOwner}.`,
+          );
+        }
+      }
+
+      try {
+        const saved = registry.register(agent);
+        return void res.status(201).json({ agent: saved, agentCount: registry.size });
+      } catch (e) {
+        return fail(res, 409, 'Registration conflict', (e as Error).message);
+      }
+    })();
   });
 
   app.get('/agents', (_req, res) => {
