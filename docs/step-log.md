@@ -3551,3 +3551,46 @@ mint, 16 sicil yazimi) 0.021 Sepolia ETH.
 Agent'lar kendi `description`'larini yazmiyor, cunku 20 adrese gas gondermek
 gerekirdi. spike-01 bunu bir kez yapti ve kanit olarak duruyor: profil
 yazilabiliyor, skor yazilamiyor.
+
+## GUVENLIK DUZELTMESI — iki acik (2026-09-13)
+
+Teslim oncesi inceleme iki acik buldu. Ikisi de kapatildi.
+
+### 1. `/resolve` hazineden odenmemis market aciyordu
+
+`POST /resolve` sabit 0.1 HBAR aliyor. Cevaplanmis ya da kosan market yoksa
+yeni market aciyor ve `depositTinybar`'i odenmis gibi kaydediyordu. Settlement
+o depozitodan agent odemelerini ve asker iadesini hazineden yapiyordu.
+Ustelik `params` govdeden geliyordu ve `b` icin ust sinir yok: `b=1000` ile
+~693 HBAR'lik subvansiyon 0.1 HBAR'a aciliyordu.
+
+Reddedilen cozum: `/resolve` fiyatini dinamik yapmak (market acilacaksa
+depozito kadar). Fiyat kapida, karar handler'da veriliyor; arada kosan market
+iptal olursa kapi sabit fiyat soyler, handler market acar — ayni acik, daha
+dar pencereyle.
+
+Yapilan: `/resolve` artik ASLA market acmiyor. Market yoksa 404 ve
+`POST /market`'in fiyati donuyor. `@x402/express` handler durumu >= 400 ise
+settlement'i `handler_failed` ile iptal ediyor (kutuphane kaynagindan
+dogrulandi, `dist/esm/index.mjs`), yani bilinmeyen soru icin para cekilmiyor.
+Market acmanin tek yolu depozitoyu govdeden fiyatlayan `POST /market`.
+
+### 2. Cekilen agent orchestrator'in turunu kilitleyebiliyordu
+
+Public `POST /market/:id/report` rotasi duruyordu. Cekilen agent orchestrator'in
+HTTP istegine cevap vermek yerine bu rotaya imzali rapor gonderirse rapor
+market'e giriyor, durma zari atilmiyor, `pendingAgentId` temizleniyordu.
+Orchestrator'in kendi `submitReport` cagrisi sonra "Sira ... degil" diye
+firlatiyor, runner `failed` deyip marketi `running`'de birakiyordu. Depozito ve
+20 bond hazinede askida.
+
+Yapilan: rota kaldirildi. Runner onu hic kullanmiyordu; raporlar yalniz
+orchestrator'in istegine cevap olarak geliyor ve imza orada dogrulaniyor.
+
+### Dogrulama
+
+- `apps/api/test/resolve.test.ts`: bilinmeyen soru 404 ve hicbir sey acilmiyor;
+  `params.b=1000` ile market acilamiyor; kosan markete 202 ile isaret ediyor.
+- `apps/api/test/app.test.ts`: rapor rotasi 404, cekilen agent'in turu
+  orchestrator'da kaliyor.
+- `scripts/check-resolve.ts`: once 404, sonra `POST /market`, sonra 202.

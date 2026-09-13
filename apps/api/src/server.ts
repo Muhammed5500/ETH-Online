@@ -291,7 +291,7 @@ async function main(): Promise<void> {
       `  ENS:           ${ensParent && ensResolver ? `publishing records under ${ensParent}` : 'not configured, records stay off chain'}`,
     );
     console.log('\n  Paid:   POST /market, POST /market/:id/bond, POST /resolve');
-    console.log('  Signed: POST /market/:id/report');
+    console.log('  Signed: reports, requested from each agent\'s registered endpoint');
     console.log('  Open:   GET /markets, GET /market/:id, /agents, POST /agents/register\n');
   });
 

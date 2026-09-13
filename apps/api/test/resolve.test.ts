@@ -264,39 +264,47 @@ describe('POST /resolve', () => {
     expect(res.body.verify.hcsTopicId).toBe('0.0.7777');
   });
 
-  it('opens a market and says so, rather than selling a guess', async () => {
+  it('refuses an unknown question with a 4xx and opens nothing, so nothing is charged', async () => {
+    // A 4xx is what makes @x402/express cancel settlement: the caller pays
+    // nothing for a question no market has touched.
     const res = await request(api.app)
       .post('/resolve')
       .send({ question: 'Is Protocol Z liquidity structure a rug risk?' })
-      .expect(202);
+      .expect(404);
 
-    expect(res.body.status).toBe('opened');
-    expect(res.body.marketId).toBeTruthy();
-    expect(res.body.marketStatus).toBe('bonding');
-    expect(res.body.watch).toBe(`/market/${res.body.marketId}`);
+    expect(res.body.error).toMatch(/No market/);
+    expect(res.body.open.route).toBe('POST /market');
+    expect(api.markets.size).toBe(0);
+    expect(ledger.topics.size).toBe(0);
   });
 
-  it('NEVER opens a second market for a question already in flight', async () => {
+  it('THE HOLE: a flat fee cannot open a market, whatever parameters come with it', async () => {
+    // Before: this opened a market whose deposit nobody paid, with b taken from
+    // the body. b=1000 meant a subsidy of ~693 HBAR against a 0.1 HBAR fee.
+    await request(api.app)
+      .post('/resolve')
+      .send({
+        question: 'Is Protocol Y growth organic?',
+        params: { b: 1000 },
+        askerAccountId: '0.0.12345',
+      })
+      .expect(404);
+    expect(api.markets.size).toBe(0);
+  });
+
+  it('points at a market already in flight rather than opening a second one', async () => {
     // Two markets on one question split the agents and give two prices, each
     // from half the information — the design the paper rules out.
     const question = 'Does this address cluster belong to one actor?';
-    const first = await request(api.app).post('/resolve').send({ question }).expect(202);
-    const second = await request(api.app)
+    const opened = await request(api.app).post('/market').send({ question }).expect(201);
+    const res = await request(api.app)
       .post('/resolve')
       .send({ question: `  ${question.toUpperCase()}  ` })
       .expect(202);
 
-    expect(second.body.status).toBe('pending');
-    expect(second.body.marketId).toBe(first.body.marketId);
+    expect(res.body.status).toBe('pending');
+    expect(res.body.marketId).toBe(opened.body.marketId);
+    expect(res.body.watch).toBe(`/market/${opened.body.marketId}`);
     expect(api.markets.size).toBe(1);
-  });
-
-  it('writes the opening message to the ledger, like any other market', async () => {
-    const res = await request(api.app)
-      .post('/resolve')
-      .send({ question: 'Is Protocol Q growth wash-farmed?' })
-      .expect(202);
-    const messages = ledger.topics.get(res.body.topicId) ?? [];
-    expect(messages[0]).toMatchObject({ type: 'market-open', marketId: res.body.marketId });
   });
 });

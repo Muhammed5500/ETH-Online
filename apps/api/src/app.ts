@@ -8,9 +8,11 @@
  *                 payment IS the action — there is nothing to authenticate
  *                 separately.
  *
- *   Signed:       submitting a report. No money moves, so payment cannot prove
- *                 authorship; the agent signs with the same key it bonded
- *                 with. See `signatures.ts`.
+ *   Signed:       reports. No money moves, so payment cannot prove authorship;
+ *                 the agent signs with the same key it bonded with. There is
+ *                 no route for them: the orchestrator requests each report
+ *                 from the drawn agent and verifies it there. See
+ *                 `signatures.ts` and `orchestrator.ts`.
  *
  *   Open:         everything readable, plus agent registration. PLAN section
  *                 3.3 — registration is open to anyone, and this demo merely
@@ -53,7 +55,7 @@ import {
   unitsToTinybar,
 } from './pricing.js';
 import { summarize } from './settlement-progress.js';
-import { verifyRegistrationSignature, verifyReportSignature } from './signatures.js';
+import { verifyRegistrationSignature } from './signatures.js';
 import { onPaymentFailure } from './payment-rollback.js';
 import { agentRecords, recordFor } from './reputation.js';
 import {
@@ -534,111 +536,18 @@ export function createApp(deps: AppDeps): Api {
     });
   });
 
-  // ---------------------------------------------------------- post a report
+  // ------------------------------------------------------------- reports
   //
-  // Free, so the signature is what proves authorship. The agent must already
-  // have been drawn — that sequencing is the orchestrator's job (STEP 16).
-  app.post('/market/:id/report', (req, res) => {
-    void (async () => {
-      const stored = markets.get(String(req.params['id']));
-      if (!stored) return fail(res, 404, 'No such market');
-
-      const body = asRecord(req.body);
-      let agentId: string;
-      let signature: string;
-      let probability: number;
-      try {
-        agentId = requireString(body['agentId'], 'agentId');
-        signature = requireString(body['signature'], 'signature');
-        probability = Number(body['probability']);
-        if (!Number.isFinite(probability) || probability < 0 || probability > 1) {
-          throw new Error('"probability" must be a number in [0, 1].');
-        }
-      } catch (e) {
-        return fail(res, 400, 'Invalid report', (e as Error).message);
-      }
-
-      const agent = registry.get(agentId);
-      if (!agent) return fail(res, 404, 'Unknown agent');
-
-      const state = stored.market.getState();
-      if (state.status !== 'running') {
-        return fail(res, 409, 'Market is not running', `Market ${stored.id} is ${state.status}.`);
-      }
-      if (state.pendingAgentId !== agentId) {
-        return fail(
-          res,
-          409,
-          'Not your turn',
-          `The market is waiting for ${state.pendingAgentId ?? 'nobody'}.`,
-        );
-      }
-
-      // Signed over the RAW probability, before any clipping: that is what the
-      // agent committed to, and the clip has to stay independently auditable.
-      const position = state.reports.length + 1;
-      const rawBelief = beliefFromProbability(probability);
-      const check = verifyReportSignature(
-        { marketId: stored.id, agentId, position, belief: rawBelief },
-        signature,
-        agent.publicKey,
-      );
-      if (!check.ok) return fail(res, 401, 'Bad signature', check.reason);
-
-      let report;
-      try {
-        report = stored.market.submitReport(agentId, rawBelief);
-      } catch (e) {
-        return fail(res, 409, 'Report rejected', (e as Error).message);
-      }
-
-      // Display-only, and outside the signature on purpose: the signature
-      // covers the probability, which is the only thing scored. An agent that
-      // lies here misleads a reader; it cannot move a payout.
-      const evidenceDigest =
-        typeof body['evidenceDigest'] === 'string' ? body['evidenceDigest'] : undefined;
-      stored.annotations.set(report.position, {
-        position: report.position,
-        agentId,
-        ...(typeof body['reasoning'] === 'string' ? { reasoning: body['reasoning'] } : {}),
-        ...(Array.isArray(body['sliceIds'])
-          ? { sliceIds: body['sliceIds'].filter((x): x is string => typeof x === 'string') }
-          : {}),
-        ...(typeof body['evidenceCostUsd'] === 'number'
-          ? { evidenceCostUsd: body['evidenceCostUsd'] }
-          : {}),
-        ...(evidenceDigest ? { evidenceDigest } : {}),
-      });
-
-      try {
-        const appended = await deps.ledger.append(stored.topicId, {
-          v: 1,
-          type: 'report',
-          marketId: stored.id,
-          ts: now(),
-          position: report.position,
-          agentId,
-          belief: report.belief,
-          rawBelief: report.rawBelief,
-          ...(evidenceDigest ? { evidenceDigest } : {}),
-        });
-        // Feeds the next draw and the stopping roll. The roll itself belongs
-        // to the orchestrator, which knows the round is complete (STEP 16).
-        stored.rng.update(appended.runningHash);
-
-        return void res.status(201).json({
-          position: report.position,
-          belief: report.belief,
-          rawBelief: report.rawBelief,
-          clipped: report.belief[1] !== report.rawBelief[1],
-          sequenceNumber: appended.sequenceNumber,
-          consensusTimestamp: appended.consensusTimestamp,
-        });
-      } catch (e) {
-        return fail(res, 502, 'Report accepted but could not be written to the ledger', (e as Error).message);
-      }
-    })();
-  });
+  // There is deliberately no route for posting a report. The orchestrator asks
+  // the drawn agent at its registered endpoint and verifies the signed answer
+  // itself (orchestrator.ts), inside the round it is running.
+  //
+  // A public route used to exist as well, and it was a way to break a market.
+  // The drawn agent could answer here instead of to the orchestrator: the
+  // report landed with no stopping roll, the orchestrator's own submit then
+  // threw because the turn had already moved on, and the runner left the market
+  // `running` for good, with the deposit and every bond stuck in the treasury.
+  // One way in, and one place that decides what a round is.
 
   // ------------------------------------------------------------ public reads
   app.get('/markets', (_req, res) => {
@@ -934,76 +843,25 @@ export function createApp(deps: AppDeps): Api {
         });
       }
 
-      // Nothing yet: open one. The request does NOT wait for it. A full market
-      // is twenty bonds and a sequence of consensus rounds — about a hundred
-      // seconds on testnet (STEP 17) — and no client waits that long. Selling
-      // a guess in the meantime would be selling an answer the mechanism never
-      // produced.
-      try {
-        const params = resolveParams(body['params'], config.defaultParams);
-        const prior = resolvePrior(body['prior']);
-        assertValidParams(params);
-
-        const id = nextMarketId(markets.issued, new Date(now()));
-        const topicId = await deps.ledger.createTopic(`ethonline market ${id}`);
-        const openMessage: HcsMessage = {
-          v: 1,
-          type: 'market-open',
-          marketId: id,
-          ts: now(),
-          question,
-          prior,
-          params: {
-            k: params.k,
-            T: params.T,
-            alpha: params.alpha,
-            epsilon: params.epsilon,
-            b: params.b,
-            R: params.R,
-          },
-        };
-        const appended = await deps.ledger.append(topicId, openMessage);
-        const rng = new HcsRandomSource(appended.runningHash);
-        const market = Market.create({ id, question, params, prior }, rng);
-
-        const stored = markets.add({
-          id,
-          question,
-          topicId,
-          params,
-          prior,
-          market,
-          rng,
-          depositTinybar: depositTinybar(params, prior, config.hbarPerUnit),
-          bondTinybar: bondTinybar(params, config.hbarPerUnit),
-          ...(parseAccountId(body['askerAccountId'])
-            ? { askerAccountId: parseAccountId(body['askerAccountId'])! }
-            : {}),
-          createdAt: now(),
-          bondingClosesAt: now() + config.bondingWindowMs,
-          minBondingClosesAt: now() + config.minBondingWindowMs,
-          bonds: new Map(),
-          annotations: new Map(),
-        });
-
-        onPaymentFailure(res, `market ${stored.id} opened by /resolve (unpaid)`, () => {
-          markets.remove(stored.id);
-        });
-
-        return void res.status(202).json({
-          status: 'opened',
-          marketId: stored.id,
-          marketStatus: 'bonding',
-          topicId,
-          bondingClosesAt: stored.bondingClosesAt,
-          watch: `/market/${stored.id}`,
-          detail:
-            'No market had answered this question, so one was opened. Agents are bonding now; ' +
-            'poll this endpoint until it answers.',
-        });
-      } catch (e) {
-        return fail(res, 502, 'Could not open a market for this question', (e as Error).message);
-      }
+      // Nothing yet: refuse, and say how to get an answer. This route charges a
+      // flat fee and must never open a market. A market is funded by a deposit
+      // of b·H(prior) + k·R that settlement spends; opening one here would pay
+      // that out of money nobody put in, with `b` chosen by the caller. The 4xx
+      // also means @x402/express cancels the payment, so this costs nothing.
+      const deposit = depositTinybar(config.defaultParams, UNIFORM_PRIOR, config.hbarPerUnit);
+      return void res.status(404).json({
+        error: 'No market has priced this question',
+        open: {
+          route: 'POST /market',
+          body: { question },
+          depositTinybar: deposit.toString(),
+          protocolFeeTinybar: config.protocolFeeTinybar.toString(),
+          priceTinybar: (deposit + config.protocolFeeTinybar).toString(),
+        },
+        detail:
+          'Nothing was charged. Open a market for this question with POST /market, which is ' +
+          'priced at the deposit the market needs, then ask again once it has closed.',
+      });
     })();
   });
 

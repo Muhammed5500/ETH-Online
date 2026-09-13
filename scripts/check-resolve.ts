@@ -9,16 +9,19 @@
  *
  * So this script drives the real thing:
  *
- *   1. POST /resolve for a question nobody has asked  -> 202, a market opened
- *   2. every registered agent posts its bond
- *   3. the orchestrator runs the market over HTTP against the live fleet
- *   4. settlement
- *   5. POST /resolve for the SAME question            -> 200, the answer
+ *   1. POST /resolve for a question nobody has asked  -> 404, nothing opened
+ *   2. POST /market opens it (the route that prices the deposit)
+ *   3. POST /resolve again                            -> 202, that same market
+ *   4. every registered agent posts its bond
+ *   5. the orchestrator runs the market over HTTP against the live fleet
+ *   6. settlement
+ *   7. POST /resolve for the SAME question            -> 200, the answer
  *
- * Step 5 is the one that matters. The service sold nothing at step 1 because
+ * Step 7 is the one that matters. The service sold nothing at step 1 because
  * the mechanism had not produced anything yet, and it sells a real terminal
- * report at step 5 because it has. A service that answered at step 1 would be
- * selling a guess.
+ * report at step 7 because it has. A service that answered at step 1 would be
+ * selling a guess, and one that opened a market at step 1 would be funding it
+ * with a deposit nobody paid.
  *
  * WHAT IS REAL AND WHAT IS NOT. Real: the agents (separate processes, real
  * keys, real signatures), the mechanism, the draws and the stopping dice, the
@@ -137,16 +140,20 @@ async function main(): Promise<void> {
     // ---- 1. an unanswered question is NOT answered ---------------------
     console.log('\n1. AN UNANSWERED QUESTION\n' + '-'.repeat(72));
     const first = await post('/resolve', { question: QUESTION });
-    step(first.status === 202, `Answers 202, not a guess (HTTP ${first.status})`);
-    step(first.body?.status === 'opened', `Opened a market`, `marketId ${first.body?.marketId}`);
-    const marketId: string = first.body?.marketId;
-    if (!marketId) return;
-    note(`topic ${first.body?.topicId}`);
+    step(first.status === 404, `Answers 404, not a guess and not a market (HTTP ${first.status})`);
+    step(markets.size === 0, 'Nothing was opened for the flat fee', `markets ${markets.size}`);
 
-    // ---- 2. asking again must NOT open a second market -----------------
+    // ---- 2. the asker opens it, paying the deposit ---------------------
+    const created = await post('/market', { question: QUESTION, askerAccountId: '0.0.888' });
+    step(created.status === 201, `POST /market opened it (HTTP ${created.status})`);
+    const marketId: string = created.body?.marketId;
+    if (!marketId) return;
+    note(`topic ${created.body?.topicId}`);
+
+    // ---- 3. asking now points at that market, never a second one -------
     const again = await post('/resolve', { question: `  ${QUESTION.toUpperCase()}  ` });
     step(
-      again.body?.status === 'pending' && again.body?.marketId === marketId,
+      again.status === 202 && again.body?.status === 'pending' && again.body?.marketId === marketId,
       'Asking again points at the same market, never a second one',
       `status ${again.body?.status}, marketId ${again.body?.marketId}`,
     );

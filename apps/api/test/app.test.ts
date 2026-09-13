@@ -336,123 +336,28 @@ describe('POST /market/:id/bond', () => {
   });
 });
 
-describe('POST /market/:id/report', () => {
-  it('accepts a signed report from the agent whose turn it is', async () => {
+describe('reports have exactly one way in', () => {
+  it('offers no HTTP route for posting a report, even to the agent whose turn it is', async () => {
+    // A public report route let the drawn agent answer here instead of to the
+    // orchestrator. The report landed with no stopping roll, the orchestrator's
+    // own submit threw on a turn that had moved on, and the market stayed
+    // `running` forever with every bond stuck. Reports now arrive only as the
+    // answer to the orchestrator's own request (orchestrator.test.ts covers
+    // signatures, turn order and slashing on that path).
     const { marketId, agents } = await runningMarket();
     const stored = api.markets.get(marketId)!;
     const drawnId = stored.market.drawNextAgent()!;
     const agent = agents.find((a) => a.agentId === drawnId)!;
 
     const claim = { marketId, agentId: drawnId, position: 1, belief: beliefFromProbability(0.72) };
-    const res = await request(api.app)
+    await request(api.app)
       .post(`/market/${marketId}/report`)
       .send({ agentId: drawnId, probability: 0.72, signature: agent.sign(claim) })
-      .expect(201);
+      .expect(404);
 
-    expect(res.body.position).toBe(1);
-    expect(res.body.belief[1]).toBeCloseTo(0.72, 6);
-    expect(res.body.sequenceNumber).toBe(2); // market-open was first
-    expect(ledger.topics.get(stored.topicId)![1]).toMatchObject({ type: 'report', agentId: drawnId });
-  });
-
-  it('records both the clipped and the raw belief', async () => {
-    const { marketId, agents } = await runningMarket();
-    const stored = api.markets.get(marketId)!;
-    const drawnId = stored.market.drawNextAgent()!;
-    const agent = agents.find((a) => a.agentId === drawnId)!;
-
-    // 0.999 is well past what the bond allows the price to be moved to.
-    const claim = { marketId, agentId: drawnId, position: 1, belief: beliefFromProbability(0.999) };
-    const res = await request(api.app)
-      .post(`/market/${marketId}/report`)
-      .send({ agentId: drawnId, probability: 0.999, signature: agent.sign(claim) })
-      .expect(201);
-
-    expect(res.body.clipped).toBe(true);
-    expect(res.body.rawBelief[1]).toBeCloseTo(0.999, 6);
-    expect(res.body.belief[1]).toBeLessThan(0.999);
-  });
-
-  it('REJECTS a report from an agent whose turn it is not', async () => {
-    const { marketId, agents } = await runningMarket();
-    const stored = api.markets.get(marketId)!;
-    const drawnId = stored.market.drawNextAgent()!;
-    const other = agents.find((a) => a.agentId !== drawnId)!;
-
-    const claim = { marketId, agentId: other.agentId, position: 1, belief: beliefFromProbability(0.6) };
-    await request(api.app)
-      .post(`/market/${marketId}/report`)
-      .send({ agentId: other.agentId, probability: 0.6, signature: other.sign(claim) })
-      .expect(409);
-  });
-
-  it('REJECTS an unsigned or wrongly signed report', async () => {
-    const { marketId, agents } = await runningMarket();
-    const stored = api.markets.get(marketId)!;
-    const drawnId = stored.market.drawNextAgent()!;
-    const impostor = agents.find((a) => a.agentId !== drawnId)!;
-
-    // Right agent id, wrong key: this is the attack the signature exists for.
-    const claim = { marketId, agentId: drawnId, position: 1, belief: beliefFromProbability(0.6) };
-    await request(api.app)
-      .post(`/market/${marketId}/report`)
-      .send({ agentId: drawnId, probability: 0.6, signature: impostor.sign(claim) })
-      .expect(401);
-
-    await request(api.app)
-      .post(`/market/${marketId}/report`)
-      .send({ agentId: drawnId, probability: 0.6, signature: 'deadbeef' })
-      .expect(401);
-  });
-
-  it('REJECTS a signature made for a different probability', async () => {
-    const { marketId, agents } = await runningMarket();
-    const stored = api.markets.get(marketId)!;
-    const drawnId = stored.market.drawNextAgent()!;
-    const agent = agents.find((a) => a.agentId === drawnId)!;
-
-    const claim = { marketId, agentId: drawnId, position: 1, belief: beliefFromProbability(0.6) };
-    await request(api.app)
-      .post(`/market/${marketId}/report`)
-      .send({ agentId: drawnId, probability: 0.9, signature: agent.sign(claim) })
-      .expect(401);
-  });
-
-  it('rejects a report before the market is running', async () => {
-    const agent = makeTestAgent('agent-01');
-    await registerAgent(agent);
-    const marketId = await openMarket();
-    const claim = { marketId, agentId: 'agent-01', position: 1, belief: beliefFromProbability(0.6) };
-    await request(api.app)
-      .post(`/market/${marketId}/report`)
-      .send({ agentId: 'agent-01', probability: 0.6, signature: agent.sign(claim) })
-      .expect(409);
-  });
-
-  it('rejects a probability outside [0,1]', async () => {
-    const { marketId } = await runningMarket();
-    await request(api.app)
-      .post(`/market/${marketId}/report`)
-      .send({ agentId: 'agent-01', probability: 1.5, signature: 'ab' })
-      .expect(400);
-  });
-
-  it('advances the randomness source with every report', async () => {
-    const { marketId, agents } = await runningMarket();
-    const stored = api.markets.get(marketId)!;
-    const before = stored.rng.runningHash;
-
-    const drawnId = stored.market.drawNextAgent()!;
-    const agent = agents.find((a) => a.agentId === drawnId)!;
-    const claim = { marketId, agentId: drawnId, position: 1, belief: beliefFromProbability(0.7) };
-    await request(api.app)
-      .post(`/market/${marketId}/report`)
-      .send({ agentId: drawnId, probability: 0.7, signature: agent.sign(claim) })
-      .expect(201);
-
-    // The next stopping roll has to come from the hash of the report that was
-    // just written, not from the one before it.
-    expect(stored.rng.runningHash).not.toEqual(before);
+    // The round is still the orchestrator's to finish.
+    expect(stored.market.getState().pendingAgentId).toBe(drawnId);
+    expect(stored.market.reportCount).toBe(0);
   });
 });
 
@@ -477,15 +382,11 @@ describe('public reads', () => {
   });
 
   it('serves the report history with the topic to check it against', async () => {
-    const { marketId, agents } = await runningMarket();
+    const { marketId } = await runningMarket();
     const stored = api.markets.get(marketId)!;
     const drawnId = stored.market.drawNextAgent()!;
-    const agent = agents.find((a) => a.agentId === drawnId)!;
-    const claim = { marketId, agentId: drawnId, position: 1, belief: beliefFromProbability(0.66) };
-    await request(api.app)
-      .post(`/market/${marketId}/report`)
-      .send({ agentId: drawnId, probability: 0.66, signature: agent.sign(claim) })
-      .expect(201);
+    // Reports reach the market through the orchestrator, not a route.
+    stored.market.submitReport(drawnId, beliefFromProbability(0.66));
 
     const res = await request(api.app).get(`/market/${marketId}/reports`).expect(200);
     expect(res.body.reports).toHaveLength(1);

@@ -137,7 +137,9 @@ export function createPaymentGate(opts: PaymentGateOptions): RequestHandler {
     },
 
     'POST /resolve': {
-      description: 'Buy a market price for a question. Runs the mechanism and returns the answer.',
+      description:
+        'Buy the price a market produced for a question. Charged only when a market has answered ' +
+        'it or is running on it; otherwise the request is refused and nothing is settled.',
       mimeType: 'application/json',
       accepts: {
         scheme: 'exact',

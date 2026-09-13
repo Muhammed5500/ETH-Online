@@ -13,7 +13,17 @@
  * wait for and no reverse proxy will allow. So:
  *
  *   a question already answered   200, the answer, immediately
- *   a question not yet answered   202, a market id, and where to watch it
+ *   a market running on it        202, the market id, and where to watch it
+ *   no market at all              404, and how to open one. NOTHING IS CHARGED
+ *
+ * WHY THIS ROUTE NEVER OPENS A MARKET. It used to. A market costs a deposit of
+ * `b·H(prior) + k·R`, while this route charges a flat fee, so opening one here
+ * funded settlement with a deposit nobody had paid, and the parameters came
+ * from the request body, so a caller could raise `b` and have the treasury pay
+ * out a subsidy hundreds of times the fee. Opening a market is `POST /market`,
+ * which prices the deposit from the same body the handler uses. A 404 here is
+ * a 4xx, and `@x402/express` cancels settlement for any handler status >= 400,
+ * so asking about an unknown question costs the caller nothing.
  *
  * The alternative designs are both worse. Blocking the request would time out
  * and charge for nothing. Returning a model's guess while a market runs in the
