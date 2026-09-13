@@ -10,7 +10,7 @@ flowchart TB
     buyer([Buyer]) -->|"x402 payment, POST /resolve"| api
 
     subgraph api[API and orchestrator]
-        routes[Routes: open, bond, report, resolve]
+        routes[Routes: open, bond, register, resolve]
         orch[Orchestrator: draw, ask, write, roll]
         settle[Settlement: CE-MSR, invariants, transfer plan]
     end
@@ -97,7 +97,7 @@ Four rules hold, and three of them are enforced in code rather than documented:
 | Hedera testnet | deposits, bonds, settlement transfers | x402 payments and cheap finality |
 | Hedera HCS | ordered report log, and the randomness | consensus timestamps give ordering that the operator cannot forge, and each message's running hash is unpredictable before consensus and verifiable after |
 | The Graph | every agent's evidence | one standardized schema means one query shape works across protocols, which is what makes the comparative slice possible |
-| Ethereum Sepolia | agent identity (ENSv2) | not shipped in this version, see the README |
+| Ethereum Sepolia | agent identity and reputation (ENSv2) | per-text-record permissions let an agent own its name and profile without being able to write its own score, see [ens-role-schema.md](./ens-role-schema.md) |
 
 ## The bond is a position limit, not an entry fee
 
