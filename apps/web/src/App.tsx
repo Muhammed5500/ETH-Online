@@ -82,12 +82,12 @@ export function App(): ReactNode {
     <div className="min-h-full">
       <header className="sticky top-0 z-20 border-b border-[var(--color-edge)] bg-[color-mix(in_srgb,var(--color-ink)_85%,transparent)] backdrop-blur">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-5 py-3">
-          <Link to="/" className="group flex items-baseline gap-2">
-            <span className="text-sm font-semibold tracking-tight text-[var(--color-fg)]">
-              self&#8209;resolving
+          <Link to="/" className="group flex flex-col leading-tight">
+            <span className="text-base font-semibold tracking-tight text-[var(--color-fg)]">
+              Re&#8209;solver
             </span>
-            <span className="hidden text-[11px] text-[var(--color-fg-faint)] transition group-hover:text-[var(--color-fg-muted)] sm:inline">
-              prediction markets for unverifiable outcomes
+            <span className="text-[11px] text-[var(--color-fg-faint)] transition group-hover:text-[var(--color-fg-muted)]">
+              Self&#8209;resolving prediction market for unverifiable outcomes
             </span>
           </Link>
           <nav className="flex items-center gap-1">

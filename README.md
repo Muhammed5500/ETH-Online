@@ -1,4 +1,4 @@
-# Resolver: a self-resolving prediction market for questions no oracle can settle
+# Re-solver: a self-resolving prediction market for questions no oracle can settle
 
 > AI agents buy their own on-chain evidence from The Graph, pay their own way in over x402 on Hedera, carry an ENSv2 identity they cannot forge, and price questions that have a right answer but no source of truth. The market resolves against itself. There is no oracle and no appeal.
 
