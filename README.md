@@ -1,4 +1,4 @@
-# Unverifiable: a self-resolving prediction market for questions no oracle can settle
+# Resolver: a self-resolving prediction market for questions no oracle can settle
 
 > AI agents buy their own on-chain evidence from The Graph, pay their own way in over x402 on Hedera, carry an ENSv2 identity they cannot forge, and price questions that have a right answer but no source of truth. The market resolves against itself. There is no oracle and no appeal.
 
@@ -8,8 +8,6 @@
 | **Partner prizes** | Hedera: AI & Agentic Payments · The Graph: Best AI Use Case (From Scratch) · ENS: Best Use of ENSv2 |
 | **Theory** | Srinivasan, Karger, Chen. *Self-Resolving Prediction Markets for Unverifiable Outcomes*. [arXiv 2306.04305](https://arxiv.org/abs/2306.04305) (PDF and full text in [`docs/paper/`](./docs/paper/)) |
 | **Networks** | Hedera testnet (payments, HCS ledger, randomness) · The Graph Network gateway (evidence) · Ethereum Sepolia (ENSv2 identity) |
-| **Demo video** | `TODO: link` |
-| **Live deployment** | `TODO: link` (Railway, `pnpm start`) |
 | **Tests** | 760 unit tests, offline, ~10 s (`pnpm test`) |
 
 ## Contents
@@ -35,6 +33,7 @@
 19. [Limits, stated plainly](#19-limits-stated-plainly)
 20. [Roadmap](#20-roadmap)
 21. [How this was built, and AI tool attribution](#21-how-this-was-built-and-ai-tool-attribution)
+22. [License](#22-license)
 
 ## 1. The problem
 
@@ -669,7 +668,6 @@ Live queries against the deployments in section 9.1 through `https://gateway.the
 | At least one real paid request end to end | many: asker deposit + 20 agent bonds per market on testnet, settled back out of the treasury (section 13) |
 | Agent pays without an API key or subscription | agents hold only a Hedera key; nothing is issued by us |
 | README with setup, architecture, payment flow | sections 5 to 8 and 15 |
-| Demo video ≤ 5 minutes | `TODO: link` |
 
 Bonus points:
 
@@ -691,7 +689,6 @@ Bonus points:
 | Do meaningful work: reasoning, decisions, automation | agents turn five derived-statistic slices into a probability that moves money; the market aggregates twenty of them into a verifiable price sold over x402 |
 | x402 payment tooling | x402 client for the gateway with header-based challenge decoding, exact-decimal cost accounting and no-retry-on-payment policy ([`x402.ts`](./packages/graph/src/x402.ts), [`gateway.ts`](./packages/graph/src/gateway.ts)) |
 | Open source with clear README | this file, plus [`docs/join.md`](./docs/join.md) for running an agent |
-| Demo video 2 to 4 minutes | `TODO: link` |
 | Correct pool | From Scratch |
 
 Why this is more than "an agent calls a subgraph": the standardized schema is what makes the comparative slice possible (one query text across five protocols), and the separation of slices across agents is how the project satisfies a mathematical assumption of the mechanism, not a stylistic choice.
@@ -705,7 +702,6 @@ Why this is more than "an agent calls a subgraph": the standardized schema is wh
 | Own subname registry with custom rules | twenty agent subnames, 90-day expiry, non-transferable, non-deletable by the agent, revocable and renewable by the orchestrator |
 | AI agents as namespaces with their own identity and permissions | each agent is a subname owned by the same secp256k1 key that pays its bonds and signs its reports |
 | Functional, not hard-coded | names are verified on chain at registration (a foreign name is refused with 401), and records are written after every real settlement and read back through the UniversalResolver |
-| Video or live demo | `TODO: link` |
 
 ## 15. Run it
 
@@ -896,6 +892,6 @@ Each was considered seriously and dropped for a concrete reason. Full reasoning 
 * **Spec-driven.** The paper was read in full first. [`PLAN.md`](./PLAN.md) fixes the mechanism settings and rejected designs, [`ROADMAP.md`](./ROADMAP.md) breaks the build into 34 steps each with a test gate, and [`docs/step-log.md`](./docs/step-log.md) records what was built at each step, what broke, the traps hit on live networks, and the transaction evidence. The planning documents and step log are in Turkish.
 * **AI assistance.** Development was assisted by Anthropic's Claude (Claude Code), used for code generation, review and test writing under the plan above; commits it contributed to carry a `Co-Authored-By: Claude` trailer. Design decisions, parameter choices, track selection and every on-chain run were directed and checked by the author. At runtime, agents reason with OpenAI `gpt-4o-mini`.
 
-## License
+## 22. License
 
-`TODO: choose a license (for example MIT) before submission.`
+Released under the [MIT License](./LICENSE).
